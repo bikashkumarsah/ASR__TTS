@@ -101,9 +101,19 @@ def cmd_run_batch(args):
         nepali_corpus_path = None
         if args.nepali_corpus:
             nepali_corpus_path = Path(args.nepali_corpus)
-        elif _DEFAULT_NEPALI_CORPUS.exists():
-            nepali_corpus_path = _DEFAULT_NEPALI_CORPUS
-            print(f"  Using default Nepali-Text-Corpus: {nepali_corpus_path}")
+        else:
+            candidates = [
+                _PROJECT_ROOT / "Nepali-Text-Corpus",
+                _PROJECT_ROOT.parent / "Nepali-Text-Corpus",
+                _PROJECT_ROOT.parent.parent / "Nepali-Text-Corpus",
+                Path.cwd() / "Nepali-Text-Corpus",
+                Path.cwd().parent / "Nepali-Text-Corpus",
+            ]
+            for cand in candidates:
+                if cand.exists():
+                    nepali_corpus_path = cand
+                    print(f"  Auto-detected Nepali-Text-Corpus: {nepali_corpus_path}")
+                    break
 
         compiled_path = Path(args.pool_source) if args.pool_source else _PROJECT_ROOT / "compiled.txt"
         if not compiled_path.exists():
