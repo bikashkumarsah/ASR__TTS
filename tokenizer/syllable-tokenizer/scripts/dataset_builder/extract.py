@@ -19,7 +19,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Generator
+from typing import Generator, TextIO
 
 # ---------------------------------------------------------------------------
 # Resolve project root so we can import the existing syllabic_tokenizer.
@@ -395,6 +395,7 @@ def _parquet_shard_worker(args_tuple: tuple) -> tuple[dict, str]:
                         "unique_syllables": list(set(content_tokens)),
                         "sector": sector,
                         "source_file": f"nepali_corpus:{source_label}",
+                        "_dedup_hash": h,
                     }
                     out_f.write(json.dumps(record, ensure_ascii=False) + "\n")
                     stats["accepted"] += 1
@@ -402,6 +403,170 @@ def _parquet_shard_worker(args_tuple: tuple) -> tuple[dict, str]:
             del table, articles, sources
 
     return stats, temp_path
+
+
+def _hash_partition(h: str, num_partitions: int) -> int:
+    return int(h[:8], 16) % num_partitions
+
+
+def _route_shard_temp_file(args_tuple: tuple) -> int:
+    """Route one shard temp file into hash-partition buckets for parallel dedup."""
+    temp_path, partition_dir, num_partitions = args_tuple
+    temp_path = Path(temp_path)
+    partition_dir = Path(partition_dir)
+    handles: dict[int, TextIO] = {}
+    routed = 0
+
+    try:
+        with open(temp_path, "r", encoding="utf-8") as f:
+            for line in f:
+                rec = json.loads(line)
+                h = rec.get("_dedup_hash") or _text_hash(rec["text"])
+                p = _hash_partition(h, num_partitions)
+                if p not in handles:
+                    part_dir = partition_dir / f"part_{p:03d}"
+                    part_dir.mkdir(parents=True, exist_ok=True)
+                    handles[p] = open(part_dir / f"{temp_path.stem}.jsonl", "w", encoding="utf-8")
+                handles[p].write(line if line.endswith("\n") else line + "\n")
+                routed += 1
+    finally:
+        for fh in handles.values():
+            fh.close()
+
+    return routed
+
+
+def _dedup_partition(args_tuple: tuple) -> dict:
+    """Dedup routed records for one hash partition (runs in parallel)."""
+    partition_id, partition_dir, output_path = args_tuple
+    part_subdir = Path(partition_dir) / f"part_{partition_id:03d}"
+    seen: set[str] = set()
+    stats = {"accepted": 0, "duplicates": 0}
+
+    with open(output_path, "w", encoding="utf-8") as out_f:
+        if not part_subdir.exists():
+            return stats
+        for part_file in sorted(part_subdir.glob("*.jsonl")):
+            with open(part_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    rec = json.loads(line)
+                    h = rec.pop("_dedup_hash", None) or _text_hash(rec["text"])
+                    if h in seen:
+                        stats["duplicates"] += 1
+                        continue
+                    seen.add(h)
+                    rec["_dedup_hash"] = h
+                    out_f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+                    stats["accepted"] += 1
+
+    return stats
+
+
+def _parallel_merge_temp_files(
+    temp_files: list[Path],
+    *,
+    output_dir: Path,
+    seen_hashes: set[str],
+    stats: dict,
+    source_stats: dict,
+    max_sentences: int | None,
+    max_workers: int,
+    chunk_size: int,
+    start_chunk_idx: int,
+    start_global_id: int,
+    show_progress: bool,
+) -> tuple[int, int]:
+    """Merge shard temp files with parallel hash-partitioned dedup."""
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+    import shutil
+
+    try:
+        from tqdm import tqdm
+        use_tqdm = show_progress
+    except ImportError:
+        use_tqdm = False
+
+    num_partitions = min(max_workers, 32)
+    partition_dir = output_dir / "_merge_partitions"
+    dedup_dir = output_dir / "_merge_deduped"
+    partition_dir.mkdir(parents=True, exist_ok=True)
+    dedup_dir.mkdir(parents=True, exist_ok=True)
+
+    # Phase 1: route each shard file into hash partitions (parallel)
+    print(f"▸ Merge phase 1/3: routing {len(temp_files)} shard files into {num_partitions} partitions...")
+    route_tasks = [(str(tf), str(partition_dir), num_partitions) for tf in temp_files]
+    with ProcessPoolExecutor(max_workers=min(max_workers, len(route_tasks))) as executor:
+        futures = [executor.submit(_route_shard_temp_file, t) for t in route_tasks]
+        iterable = as_completed(futures)
+        if use_tqdm:
+            iterable = tqdm(iterable, total=len(futures), desc="Routing shards", unit=" file")
+        for fut in iterable:
+            fut.result()
+
+    # Phase 2: dedup each partition independently (parallel)
+    print(f"▸ Merge phase 2/3: deduplicating {num_partitions} partitions in parallel...")
+    dedup_tasks = [
+        (p, str(partition_dir), str(dedup_dir / f"partition_{p:03d}.jsonl"))
+        for p in range(num_partitions)
+    ]
+    with ProcessPoolExecutor(max_workers=num_partitions) as executor:
+        futures = [executor.submit(_dedup_partition, t) for t in dedup_tasks]
+        iterable = as_completed(futures)
+        if use_tqdm:
+            iterable = tqdm(iterable, total=len(futures), desc="Dedup partitions", unit=" part")
+        for fut in iterable:
+            pstats = fut.result()
+            stats["duplicates"] += pstats["duplicates"]
+
+    # Phase 3: write deduped partitions to pool chunks (sequential, no hashing)
+    print("▸ Merge phase 3/3: writing pool chunks...")
+    chunk_idx = start_chunk_idx
+    global_id = start_global_id
+    buffer: list[dict] = []
+
+    def _flush():
+        nonlocal chunk_idx, buffer
+        if not buffer:
+            return
+        chunk_file = output_dir / f"pool_chunk_{chunk_idx:04d}.jsonl"
+        with open(chunk_file, "w", encoding="utf-8") as f:
+            for rec in buffer:
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        chunk_idx += 1
+        buffer = []
+
+    dedup_files = sorted(dedup_dir.glob("partition_*.jsonl"))
+    write_iter = dedup_files
+    if use_tqdm:
+        write_iter = tqdm(dedup_files, desc="Writing pool chunks", unit=" part")
+
+    for dedup_file in write_iter:
+        with open(dedup_file, "r", encoding="utf-8") as f:
+            for line in f:
+                if max_sentences is not None and stats["accepted"] >= max_sentences:
+                    break
+                rec = json.loads(line)
+                h = rec.pop("_dedup_hash", None) or _text_hash(rec["text"])
+                seen_hashes.add(h)
+
+                rec["pool_id"] = f"pool_{global_id:08d}"
+                global_id += 1
+                buffer.append(rec)
+                stats["accepted"] += 1
+                source_stats["accepted"] += 1
+
+                if len(buffer) >= chunk_size:
+                    _flush()
+
+        if max_sentences is not None and stats["accepted"] >= max_sentences:
+            break
+
+    _flush()
+
+    shutil.rmtree(partition_dir, ignore_errors=True)
+    shutil.rmtree(dedup_dir, ignore_errors=True)
+
+    return chunk_idx, global_id
 
 
 def _extract_parquet_parallel(
@@ -440,26 +605,22 @@ def _extract_parquet_parallel(
         shard_files = shard_files[:max_shards]
 
     workers = min(max_workers, len(shard_files))
-    # Round-robin shard assignment keeps shard sizes balanced across workers
-    shard_groups: list[list[str]] = [[] for _ in range(workers)]
-    for i, shard in enumerate(shard_files):
-        shard_groups[i % workers].append(str(shard))
-
     temp_dir = Path(tempfile.mkdtemp(prefix="extract_workers_", dir=output_dir))
+
+    # One future per shard so tqdm updates as each shard finishes (not per worker batch)
     tasks = []
-    for worker_id, group in enumerate(shard_groups):
-        if not group:
-            continue
-        temp_path = str(temp_dir / f"worker_{worker_id:04d}.jsonl")
+    for shard_idx, shard_path in enumerate(shard_files):
+        temp_path = str(temp_dir / f"shard_{shard_idx:04d}.jsonl")
         tasks.append((
-            group,
+            [str(shard_path)],
             lookup_vocab_path,
             min_syllables,
             max_syllables,
             temp_path,
         ))
 
-    print(f"▸ Parallel extraction: {len(shard_files)} shards across {len(tasks)} workers")
+    print(f"▸ Parallel extraction: {len(shard_files)} shards, {workers} concurrent workers")
+    print(f"  (Spawning workers — first progress tick when a shard finishes, typically 2–5 min)")
 
     worker_stats: list[dict] = []
     try:
@@ -468,11 +629,11 @@ def _extract_parquet_parallel(
     except ImportError:
         use_tqdm = False
 
-    with ProcessPoolExecutor(max_workers=len(tasks)) as executor:
+    with ProcessPoolExecutor(max_workers=workers) as executor:
         futures = [executor.submit(_parquet_shard_worker, t) for t in tasks]
         iterable = as_completed(futures)
         if use_tqdm:
-            iterable = tqdm(iterable, total=len(futures), desc="Extracting nepali_corpus", unit=" worker")
+            iterable = tqdm(iterable, total=len(futures), desc="Extracting nepali_corpus", unit=" shard")
 
         for fut in iterable:
             wstats, _ = fut.result()
@@ -488,54 +649,23 @@ def _extract_parquet_parallel(
         stats["filtered_quality"] += ws["filtered_quality"]
         stats["duplicates"] += ws["duplicates"]
 
-    # Merge worker temp files with global dedup into pool chunks
-    chunk_idx = start_chunk_idx
-    global_id = start_global_id
-    buffer: list[dict] = []
+    # Parallel hash-partitioned merge (replaces slow single-threaded global dedup)
+    temp_files = sorted(temp_dir.glob("shard_*.jsonl"))
+    chunk_idx, global_id = _parallel_merge_temp_files(
+        temp_files,
+        output_dir=output_dir,
+        seen_hashes=seen_hashes,
+        stats=stats,
+        source_stats=source_stats,
+        max_sentences=max_sentences,
+        max_workers=max_workers,
+        chunk_size=chunk_size,
+        start_chunk_idx=start_chunk_idx,
+        start_global_id=start_global_id,
+        show_progress=show_progress,
+    )
 
-    def _flush():
-        nonlocal chunk_idx, buffer
-        if not buffer:
-            return
-        chunk_file = output_dir / f"pool_chunk_{chunk_idx:04d}.jsonl"
-        with open(chunk_file, "w", encoding="utf-8") as f:
-            for rec in buffer:
-                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-        chunk_idx += 1
-        buffer = []
-
-    temp_files = sorted(temp_dir.glob("worker_*.jsonl"))
-    merge_iter = temp_files
-    if use_tqdm:
-        merge_iter = tqdm(temp_files, desc="Merging worker outputs", unit=" file")
-
-    for temp_file in merge_iter:
-        with open(temp_file, "r", encoding="utf-8") as f:
-            for line in f:
-                if max_sentences is not None and stats["accepted"] >= max_sentences:
-                    break
-                rec = json.loads(line)
-                h = _text_hash(rec["text"])
-                if h in seen_hashes:
-                    stats["duplicates"] += 1
-                    continue
-                seen_hashes.add(h)
-
-                rec["pool_id"] = f"pool_{global_id:08d}"
-                global_id += 1
-                buffer.append(rec)
-                stats["accepted"] += 1
-                source_stats["accepted"] += 1
-
-                if len(buffer) >= chunk_size:
-                    _flush()
-
-        if max_sentences is not None and stats["accepted"] >= max_sentences:
-            break
-
-    _flush()
-
-    # Clean up temp worker files
+    # Clean up temp shard files
     for temp_file in temp_files:
         temp_file.unlink(missing_ok=True)
     temp_dir.rmdir()
