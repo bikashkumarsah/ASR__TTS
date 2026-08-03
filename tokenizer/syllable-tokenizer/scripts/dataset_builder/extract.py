@@ -19,7 +19,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Generator, TextIO
+from typing import Generator
 
 # ---------------------------------------------------------------------------
 # Resolve project root so we can import the existing syllabic_tokenizer.
@@ -314,6 +314,236 @@ def _text_hash(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Parallel parquet extraction (multi-core)
+# ---------------------------------------------------------------------------
+
+def _parquet_shard_worker(args_tuple: tuple) -> tuple[dict, str]:
+    """Process assigned parquet shards; write accepted records to a temp JSONL.
+
+    Top-level function for ProcessPoolExecutor pickling.
+    """
+    shard_paths, lookup_vocab_path, min_syllables, max_syllables, temp_path = args_tuple
+
+    lookup_vocab = get_lookup_tokens(lookup_vocab_path)
+    stats = {
+        "raw": 0,
+        "accepted": 0,
+        "filtered_short": 0,
+        "filtered_long": 0,
+        "filtered_quality": 0,
+        "duplicates": 0,
+    }
+    seen_local: set[str] = set()
+
+    import pyarrow.parquet as pq
+
+    with open(temp_path, "w", encoding="utf-8") as out_f:
+        for shard_path in shard_paths:
+            try:
+                table = pq.read_table(shard_path, columns=["Article", "Source"])
+            except Exception as e:
+                print(f"⚠ Worker error reading {Path(shard_path).name}: {e}")
+                continue
+
+            articles = table.column("Article")
+            sources = table.column("Source")
+
+            for row_idx in range(len(table)):
+                article = articles[row_idx].as_py()
+                source = sources[row_idx].as_py() if sources[row_idx].is_valid else ""
+
+                if not article or not isinstance(article, str):
+                    continue
+
+                cleaned = clean_text(article)
+                if not cleaned:
+                    continue
+
+                sector = _get_sector_from_source(source)
+                source_label = source if source else "unknown"
+
+                for sent in _split_sentences(cleaned):
+                    if not sent:
+                        continue
+                    stats["raw"] += 1
+
+                    passes, tokens, syll_count = passes_quality(
+                        sent, lookup_vocab,
+                        min_syllables=min_syllables,
+                        max_syllables=max_syllables,
+                    )
+                    if not passes:
+                        if syll_count < min_syllables:
+                            stats["filtered_short"] += 1
+                        elif syll_count > max_syllables:
+                            stats["filtered_long"] += 1
+                        else:
+                            stats["filtered_quality"] += 1
+                        continue
+
+                    h = _text_hash(sent)
+                    if h in seen_local:
+                        stats["duplicates"] += 1
+                        continue
+                    seen_local.add(h)
+
+                    content_tokens = [t for t in tokens if t.strip()]
+                    record = {
+                        "text": sent,
+                        "syllables": tokens,
+                        "syllable_count": len(content_tokens),
+                        "unique_syllables": list(set(content_tokens)),
+                        "sector": sector,
+                        "source_file": f"nepali_corpus:{source_label}",
+                    }
+                    out_f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                    stats["accepted"] += 1
+
+            del table, articles, sources
+
+    return stats, temp_path
+
+
+def _extract_parquet_parallel(
+    corpus_dir: Path,
+    *,
+    lookup_vocab_path: str,
+    output_dir: Path,
+    seen_hashes: set[str],
+    stats: dict,
+    min_syllables: int,
+    max_syllables: int,
+    max_sentences: int | None,
+    max_shards: int | None,
+    max_workers: int,
+    chunk_size: int,
+    show_progress: bool,
+    start_chunk_idx: int,
+    start_global_id: int,
+) -> tuple[int, int]:
+    """Extract parquet corpus using one process per shard group."""
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+    import tempfile
+
+    import pyarrow.parquet as pq  # noqa: F401 — verify dependency early
+
+    data_dir = corpus_dir / "data"
+    if not data_dir.exists():
+        data_dir = corpus_dir
+
+    shard_files = sorted(data_dir.glob("*.parquet"))
+    if not shard_files:
+        print(f"⚠ No parquet files found in {data_dir}")
+        return start_chunk_idx, start_global_id
+
+    if max_shards is not None:
+        shard_files = shard_files[:max_shards]
+
+    workers = min(max_workers, len(shard_files))
+    # Round-robin shard assignment keeps shard sizes balanced across workers
+    shard_groups: list[list[str]] = [[] for _ in range(workers)]
+    for i, shard in enumerate(shard_files):
+        shard_groups[i % workers].append(str(shard))
+
+    temp_dir = Path(tempfile.mkdtemp(prefix="extract_workers_", dir=output_dir))
+    tasks = []
+    for worker_id, group in enumerate(shard_groups):
+        if not group:
+            continue
+        temp_path = str(temp_dir / f"worker_{worker_id:04d}.jsonl")
+        tasks.append((
+            group,
+            lookup_vocab_path,
+            min_syllables,
+            max_syllables,
+            temp_path,
+        ))
+
+    print(f"▸ Parallel extraction: {len(shard_files)} shards across {len(tasks)} workers")
+
+    worker_stats: list[dict] = []
+    try:
+        from tqdm import tqdm
+        use_tqdm = show_progress
+    except ImportError:
+        use_tqdm = False
+
+    with ProcessPoolExecutor(max_workers=len(tasks)) as executor:
+        futures = [executor.submit(_parquet_shard_worker, t) for t in tasks]
+        iterable = as_completed(futures)
+        if use_tqdm:
+            iterable = tqdm(iterable, total=len(futures), desc="Extracting nepali_corpus", unit=" worker")
+
+        for fut in iterable:
+            wstats, _ = fut.result()
+            worker_stats.append(wstats)
+
+    # Aggregate worker stats
+    source_stats = stats["by_source"].setdefault("nepali_corpus", {"raw": 0, "accepted": 0})
+    for ws in worker_stats:
+        stats["total_raw"] += ws["raw"]
+        source_stats["raw"] += ws["raw"]
+        stats["filtered_short"] += ws["filtered_short"]
+        stats["filtered_long"] += ws["filtered_long"]
+        stats["filtered_quality"] += ws["filtered_quality"]
+        stats["duplicates"] += ws["duplicates"]
+
+    # Merge worker temp files with global dedup into pool chunks
+    chunk_idx = start_chunk_idx
+    global_id = start_global_id
+    buffer: list[dict] = []
+
+    def _flush():
+        nonlocal chunk_idx, buffer
+        if not buffer:
+            return
+        chunk_file = output_dir / f"pool_chunk_{chunk_idx:04d}.jsonl"
+        with open(chunk_file, "w", encoding="utf-8") as f:
+            for rec in buffer:
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        chunk_idx += 1
+        buffer = []
+
+    temp_files = sorted(temp_dir.glob("worker_*.jsonl"))
+    merge_iter = temp_files
+    if use_tqdm:
+        merge_iter = tqdm(temp_files, desc="Merging worker outputs", unit=" file")
+
+    for temp_file in merge_iter:
+        with open(temp_file, "r", encoding="utf-8") as f:
+            for line in f:
+                if max_sentences is not None and stats["accepted"] >= max_sentences:
+                    break
+                rec = json.loads(line)
+                h = _text_hash(rec["text"])
+                if h in seen_hashes:
+                    stats["duplicates"] += 1
+                    continue
+                seen_hashes.add(h)
+
+                rec["pool_id"] = f"pool_{global_id:08d}"
+                global_id += 1
+                buffer.append(rec)
+                stats["accepted"] += 1
+                source_stats["accepted"] += 1
+
+                if len(buffer) >= chunk_size:
+                    _flush()
+
+        if max_sentences is not None and stats["accepted"] >= max_sentences:
+            break
+
+    _flush()
+
+    # Clean up temp worker files
+    for temp_file in temp_files:
+        temp_file.unlink(missing_ok=True)
+    temp_dir.rmdir()
+
+    return chunk_idx, global_id
+
+
+# ---------------------------------------------------------------------------
 # Main extraction pipeline
 # ---------------------------------------------------------------------------
 
@@ -330,6 +560,7 @@ def extract_pool(
     max_syllables: int = MAX_SYLLABLES,
     chunk_size: int = 50_000,
     show_progress: bool = True,
+    max_workers: int | None = None,
 ) -> dict:
     """Extract, filter, dedup and write candidate pool to JSONL chunks.
 
@@ -343,6 +574,7 @@ def extract_pool(
     max_corpus : maximum sentences to extract from parquet corpus
     max_shards : max parquet shard files to read (None = all)
     chunk_size : sentences per JSONL chunk file
+    max_workers : parallel processes for parquet extraction (defaults to CPU count)
 
     Returns
     -------
@@ -353,9 +585,12 @@ def extract_pool(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    lookup_vocab = get_lookup_tokens(
-        str(_PROJECT_ROOT / "dataset" / "nepali_syllables_lookup.vocab")
-    )
+    lookup_vocab_path = str(_PROJECT_ROOT / "dataset" / "nepali_syllables_lookup.vocab")
+    lookup_vocab = get_lookup_tokens(lookup_vocab_path)
+
+    if max_workers is None:
+        max_workers = os.cpu_count() or 4
+    max_workers = max(1, max_workers)
 
     seen_hashes: set[str] = set()
     stats = {
@@ -379,20 +614,24 @@ def extract_pool(
             return tqdm(iterable, desc=desc, unit=" sents")
         return iterable
 
-    # Collect sentence generators
+    # Collect sentence generators (compiled/book — always sequential)
     generators = []
+    nepali_corpus_resolved: Path | None = None
+    corpus_limit: int | None = None
 
     # 1. Nepali-Text-Corpus (parquet) — primary source if provided
     if nepali_corpus_path:
         nepali_corpus_path = Path(nepali_corpus_path)
         if nepali_corpus_path.exists():
+            nepali_corpus_resolved = nepali_corpus_path
             corpus_limit = None if (max_corpus is not None and max_corpus <= 0) else max_corpus
-            generators.append(("nepali_corpus", _extract_parquet_sentences(
-                nepali_corpus_path,
-                max_sentences=corpus_limit,
-                max_shards=max_shards,
-                split="all",
-            )))
+            if max_workers <= 1:
+                generators.append(("nepali_corpus", _extract_parquet_sentences(
+                    nepali_corpus_path,
+                    max_sentences=corpus_limit,
+                    max_shards=max_shards,
+                    split="all",
+                )))
         else:
             print(f"⚠ Nepali-Text-Corpus path not found: {nepali_corpus_path}")
 
@@ -410,16 +649,37 @@ def extract_pool(
         if book_path.exists():
             generators.append(("Source_book.txt", _extract_book_sentences(book_path)))
 
-    if not generators:
+    if not generators and nepali_corpus_resolved is None:
         print("⚠ No source files found. Provide at least one source.")
         return stats
 
     chunk_idx = 0
     buffer: list[dict] = []
-    fh: TextIO | None = None
+
+    # Parallel parquet extraction (uses all cores; dedup merge is single-threaded)
+    if nepali_corpus_resolved is not None and max_workers > 1:
+        stats["by_source"]["nepali_corpus"] = {"raw": 0, "accepted": 0}
+        chunk_idx, global_id = _extract_parquet_parallel(
+            nepali_corpus_resolved,
+            lookup_vocab_path=lookup_vocab_path,
+            output_dir=output_dir,
+            seen_hashes=seen_hashes,
+            stats=stats,
+            min_syllables=min_syllables,
+            max_syllables=max_syllables,
+            max_sentences=corpus_limit,
+            max_shards=max_shards,
+            max_workers=max_workers,
+            chunk_size=chunk_size,
+            show_progress=show_progress,
+            start_chunk_idx=0,
+            start_global_id=0,
+        )
+    else:
+        global_id = 0
 
     def _flush():
-        nonlocal chunk_idx, buffer, fh
+        nonlocal chunk_idx, buffer
         if not buffer:
             return
         chunk_file = output_dir / f"pool_chunk_{chunk_idx:04d}.jsonl"
@@ -429,7 +689,6 @@ def extract_pool(
         chunk_idx += 1
         buffer = []
 
-    global_id = 0
     for source_name, gen in generators:
         stats["by_source"][source_name] = {"raw": 0, "accepted": 0}
         for raw_rec in _progress(gen, desc=f"Extracting {source_name}"):
@@ -514,6 +773,8 @@ if __name__ == "__main__":
                         help="Max parquet shards to read (for testing)")
     parser.add_argument("--min-syllables", type=int, default=MIN_SYLLABLES)
     parser.add_argument("--max-syllables", type=int, default=MAX_SYLLABLES)
+    parser.add_argument("--workers", type=int, default=None,
+                        help="Parallel worker processes for parquet extraction (default: CPU count)")
 
     args = parser.parse_args()
     extract_pool(
@@ -526,4 +787,5 @@ if __name__ == "__main__":
         max_shards=args.max_shards,
         min_syllables=args.min_syllables,
         max_syllables=args.max_syllables,
+        max_workers=args.workers,
     )
