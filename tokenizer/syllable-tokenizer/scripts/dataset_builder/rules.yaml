@@ -1,0 +1,930 @@
+# Regex patterns used for rule-based annotation of Nepali sentences for ASR dataset.
+# Each pattern is matched against cleaned Devanagari text (no English, no HTML — only Devanagari + spaces).
+# The corpus now includes articles from 99+ Nepali news/blog sources with diverse topics.
+
+tense:
+  past:
+    - "ए$" # e
+    - "यो$" # yo
+    - "थिय" # thiya
+    - "भय" # bhaya
+    - "एको$" # eko
+    - "एकी$" # eki
+    - "एका$" # eka
+    - "इयो$" # iyo
+    - "एछ$" # echa
+    - "एन$" # ena
+    - "इन$" # ina
+    - "गर्यो" # garyo
+    - "भयो" # bhayo
+    - "गयो" # gayo
+    - "दियो" # diyo
+    - "लियो" # liyo
+    - "सक्यो" # sakyo
+    - "सकेको" # sakeko
+    - "पुग्यो" # pugyo
+    - "रह्यो" # rahyo
+    - "राख्यो" # rakhyo
+    - "थियो" # thiyo
+    - "थिए" # thie
+    - "थिइन" # thiin
+    - "गरे" # gare
+    - "इरहेको" # iraheko (continuous past)
+    - "दैथिए" # daithie (continuous past)
+    - "दैथियो" # daithiyo (continuous past)
+    - "दैथिइन्" # daithiin (continuous past)
+    - "दैथियौ" # daithiyau (continuous past)
+    - "दैथियौं" # daithiyaun (continuous past)
+    - "इसकेको" # isakeko (perfective)
+    - "एपछि" # epachi (perfective)
+    - "थ्यो" # thyo (habitual past)
+    - "न्थे" # nthe (habitual past)
+    - "न्थ्यो" # nthyo (habitual past)
+    - "न्थ्यौ" # nthyau (habitual past)
+    - "न्थ्यौं" # nthyaun (habitual past)
+    - "न्थ्यिन्" # nthyin (habitual past)
+    - "थियौ" # thiyau
+    - "थियौं" # thiyaun
+    - "थिइस्" # thiis
+    - "गरेको" # gareko
+    - "भएको" # bhaeko
+    - "खाएको" # khaeko
+    - "सुतेको" # suteko
+    - "गएका" # gaeka
+    - "आएका" # aaeka
+    - "पढेका" # padheka
+    - "भनेको" # bhaneko
+    - "खेलेको" # kheleko
+    - "जितेको" # jiteko
+    - "हारेको" # hareko
+    - "बसेको" # baseko
+    - "गर्थ्यो" # garthyo
+    - "भन्थ्यो" # bhanthyo
+    - "भन्थे" # bhanthe
+    - "जान्थे" # janthe
+    - "गर्दथ्यो" # gardathyo
+    - "सकिन्थ्यो" # sakinthyo
+    - "पाइन्थ्यो" # painthyo
+    - "भेटिन्थ्यो" # bhetinthyo
+    - "देखिन्थ्यो" # dekhinthyo
+    - "खाइन्थ्यो" # khainthyo
+    - "गरेछ" # garecha
+    - "भएछ" # bhaecha
+    - "आएछ" # aaecha
+    - "गएछ" # gaecha
+    - "गरेथ्यो" # garethyo
+    - "भनेथ्यो" # bhanethyo
+    - "खोजेको" # khojeko
+    - "पाएको" # paeko
+    - "गरेका" # gareka
+    - "भएका" # bhaeka
+    - "थिएनन्" # thienan
+    - "भएनन्" # bhaenan
+    - "गरेनन्" # garenan
+
+  present:
+    - "छ$" # cha
+    - "छन्$" # chan
+    - "हुन्छ" # huncha
+    - "हो$" # ho
+    - "हुन्$" # hun
+    - "गर्छ" # garcha
+    - "गर्छन्" # garchan
+    - "गर्दछ" # gardacha
+    - "छु$" # chu
+    - "छौं" # chaun
+    - "छिन्" # chin
+    - "हुन्छन्" # hunchan
+    - "दिन्छ" # dincha
+    - "जान्छ" # jancha
+    - "आउँछ" # auncha
+    - "खान्छ" # khancha
+    - "दैछ" # daicha (present continuous)
+    - "इरहेको छ" # iraheko cha (present continuous)
+    - "दै छ" # dai cha (present continuous)
+    - "गर्दैछ" # gardaicha
+    - "गर्दैछन्" # gardaichan
+    - "खाँदैछ" # khandaicha
+    - "जाँदैछ" # jandaicha
+    - "हुँदैछ" # hundaicha
+    - "बस्दैछ" # basdaicha
+    - "सुत्दैछ" # sutdaicha
+    - "हाँस्दैछ" # hansdaicha
+    - "खेल्दैछ" # kheldaicha
+    - "पढ्दैछ" # padhdaicha
+    - "हेर्दैछ" # herdaicha
+    - "सुन्दैछ" # sundaicha
+    - "भन्दैछ" # bhandaicha
+    - "गर्दछन्" # gardachan (present habitual)
+    - "भन्दछन्" # bhandachan (present habitual)
+    - "जान्दछन्" # jandachan (present habitual)
+    - "आउँदछन्" # aundachan (present habitual)
+    - "खान्दछन्" # khandachan (present habitual)
+    - "सक्छ" # sakcha
+    - "सक्छन्" # sakchan
+    - "पर्छ" # parcha
+    - "पर्छन्" # parchan
+    - "मिल्छ" # milcha
+    - "मिल्छन्" # milchan
+    - "चाहिन्छ" # chahincha
+    - "चाहिन्छन्" # chahinchan
+    - "पाइन्छ" # paincha
+    - "पाइन्छन्" # painchan
+    - "देखिन्छ" # dekhincha
+    - "देखिन्छन्" # dekhinchan
+    - "बुझिन्छ" # buzhincha
+    - "गरिन्छ" # garincha
+    - "खाइन्छ" # khaincha
+    - "भनिन्छ" # bhanincha
+    - "सुनिन्छ" # sunincha
+    - "खेलिन्छ" # khelincha
+    - "लेखिन्छ" # lekhincha
+    - "पढिन्छ" # padhincha
+    - "छौ" # chau
+    - "छस्" # chas
+    - "हौ" # hau
+    - "हुनुहुन्छ" # hunuhuncha
+    - "गर्नुहुन्छ" # garnuhuncha
+    - "भन्नुहुन्छ" # bhannuhuncha
+    - "जानुहुन्छ" # januhuncha
+    - "आउनुहुन्छ" # aaunuhuncha
+    - "खानुहुन्छ" # khanuhuncha
+    - "सक्नुहुन्छ" # saknuhuncha
+
+  future:
+    - "नेछ" # necha
+    - "लानेछ" # lanecha
+    - "हुनेछ" # hunecha
+    - "नेछन्" # nechan
+    - "ने छ" # ne cha
+    - "उला" # ula
+    - "होला" # hola
+    - "गर्नेछ" # garnecha
+    - "दिनेछ" # dinecha
+    - "जानेछ" # janecha
+    - "आउनेछ" # aaunecha
+    - "पर्नेछ" # parnecha
+    - "सक्नेछ" # saknecha
+    - "ने" # ne (intentional)
+    - "ने हो" # ne ho (intentional)
+    - "ने भयो" # ne bhayo (intentional)
+    - "औला" # aula (probabilistic)
+    - "गरौँला" # garaunla (probabilistic)
+    - "जाऔँला" # jaaunla (probabilistic)
+    - "खाऔँला" # khaaunla (probabilistic)
+    - "भनौँला" # bhanaunla (probabilistic)
+    - "गर$" # gar (imperative)
+    - "गर्नुहोस्" # garnuhos (imperative)
+    - "गर्नुस्" # garnus (imperative)
+    - "दिनुस्" # dinus (imperative)
+    - "जानुस्" # janus (imperative)
+    - "आउनुस्" # aaunus (imperative)
+    - "खानुस्" # khanus (imperative)
+    - "बस्नुस्" # basnus (imperative)
+    - "हेर्नुस्" # hernus (imperative)
+    - "सुन्नुस्" # sunnus (imperative)
+    - "पढ्नुस्" # padhnus (imperative)
+    - "लेख्नुस्" # lekhnus (imperative)
+    - "खेल्नुस्" # khelnus (imperative)
+    - "सक्नुस्" # saknus (imperative)
+    - "हुनेछन्" # hunechan
+    - "गर्नेछन्" # garnechan
+    - "जानेछन्" # janechan
+    - "आउनेछन्" # aaunechan
+    - "खानेछन्" # khanechan
+    - "भन्नेछन्" # bhannechan
+    - "सुन्नेछन्" # sunnechan
+    - "देख्नेछन्" # dekhnechan
+    - "पढ्नेछन्" # padhnechan
+    - "खेल्नेछन्" # khelnechan
+    - "जित्नेछन्" # jitnechan
+    - "हार्नेछन्" # harnechan
+    - "पाउनेछन्" # paunechan
+    - "रहनेछ" # rahanecha
+    - "रहनेछन्" # rahanechan
+    - "बन्नेछ" # bannecha
+    - "बन्नेछन्" # bannechan
+    - "गराउनेछ" # garaunecha
+    - "गराउनेछन्" # garaunechan
+    - "लाग्नेछ" # lagnecha
+    - "लाग्नेछन्" # lagnechan
+    - "चल्नेछ" # chalnecha
+    - "चल्नेछन्" # chalnechan
+    - "हुनेछौँ" # hunechaun
+    - "गर्नेछौँ" # garnechaun
+    - "जानेछौँ" # janechaun
+    - "हुनेछौ" # hunechau
+    - "गर्नेछौ" # garnechau
+    - "हुनेछस्" # hunechas
+    - "गर्नेछस्" # garnechas
+
+polarity:
+  negative:
+    - "छैन" # chaina
+    - "छैनन्" # chainan
+    - "भएन" # bhaena
+    - "सकेन" # sakena
+    - "थिएन" # thiena
+    - "हुँदैन" # hundaina
+    - "हुन्न" # hunna
+    - "गर्दैन" # gardaina
+    - "दिँदैन" # dindaina
+    - "जाँदैन" # jandaina
+    - "खाँदैन" # khandaina
+    - "सक्दैन" # sakdaina
+    - "पर्दैन" # pardaina
+    - "मिल्दैन" # mildaina
+    - "चाहिँदैन" # chahindaina
+    - "नभ" # nabha
+    - "नग" # naga
+    - "नह" # naha
+    - "(?:^|\\s)न(?:\\s|$)" # na (isolated negation)
+    - "नसक" # nasaka
+    - "नपर" # napara
+    - "नदि" # nadi
+    - "नजान" # najana
+    - "नआउ" # naau
+    - "दुर्घटना" # durghatana (disaster)
+    - "हत्या" # hatya (crime)
+    - "भ्रष्टाचार" # bhrastachar (crime)
+    - "अपराध" # aparaadh (crime)
+    - "समस्या" # samasya (problem)
+    - "हिंसा" # himsa (violence)
+    - "मृत्यु" # mrityu (death)
+    - "विपद्" # bipad (disaster)
+    - "आतंक" # aatanka (terror)
+    - "विरोध" # birodh (opposition)
+    - "आलोचना" # aalochana (criticism)
+    - "असफल" # asafal (failure)
+    - "कमजोर" # kamjor (weak)
+    - "दुख" # dukha (sorrow)
+    - "दुःख" # dukha (sorrow)
+    - "पीडा" # pida (pain)
+    - "शोक" # shok (mourning)
+    - "रोग" # rog (disease)
+    - "बिरामी" # birami (sick)
+    - "महामारी" # mahamari (pandemic)
+    - "संकट" # sankat (crisis)
+    - "चुनौती" # chunauti (challenge)
+    - "घाटा" # ghata (loss)
+    - "नोक्सान" # noksan (damage)
+    - "क्षति" # kshati (damage/loss)
+    - "विनाश" # binash (destruction)
+    - "खराब" # kharab (bad)
+    - "नराम्रो" # naramro (bad)
+    - "झूटो" # jhuto (fake)
+    - "अन्याय" # anyaya (injustice)
+    - "अत्याचार" # atyachar (atrocity)
+    - "शोषण" # shoshan (exploitation)
+    - "विवाद" # bibad (dispute)
+    - "द्वन्द्व" # dwandwa (conflict)
+    - "युद्ध" # yuddha (war)
+    - "हमला" # hamala (attack)
+    - "आक्रमण" # aakraman (attack)
+    - "धम्की" # dhamki (threat)
+    - "त्रास" # traas (fear/terror)
+    - "डर" # dar (fear)
+    - "भय" # bhaya (fear)
+    - "निराशा" # nirasha (despair)
+    - "असन्तुष्टि" # asantusti (dissatisfaction)
+    - "अवरोध" # abarodh (obstruction)
+    - "ढिलाइ" # dhilai (delay)
+    - "कठिनाइ" # kathinai (difficulty)
+    - "अभाव" # abhav (lack/scarcity)
+
+  positive:
+    - "राम्रो" # ramro
+    - "उत्तम" # uttam
+    - "सफल" # safal
+    - "उत्कृष्ट" # utkrishtha
+    - "सुन्दर" # sundar
+    - "शान्त" # shanta
+    - "समृद्ध" # samriddha
+    - "प्रसन्न" # prasanna
+    - "उन्नत" # unnat
+    - "विकास" # bikas
+    - "सहयोग" # sahayog
+    - "सुधार" # sudhar
+    - "प्रगति" # pragati
+    - "उपलब्धि" # upalabdhi (achievement)
+    - "जित" # jit (victory)
+    - "सम्मान" # samman (honor)
+    - "पुरस्कार" # puraskar (award)
+    - "कीर्तिमान" # kirtiman (record)
+    - "आशा" # aasha (hope)
+    - "उत्साह" # utsah (enthusiasm)
+    - "प्रेरणा" # prerana (inspiration)
+    - "खुसी" # khusi (happiness)
+    - "सुख" # sukha (comfort)
+    - "शान्ति" # shanti (peace)
+    - "आनन्द" # ananda (joy)
+    - "मजा" # maja (fun)
+    - "रमाइलो" # ramailo (enjoyment)
+    - "उत्सव" # utsav (festival)
+    - "महोत्सव" # mahotsav (grand festival)
+    - "विजय" # bijaya (victory)
+    - "सफलता" # safalta (success)
+    - "योगदान" # yogdan (contribution)
+    - "समर्थन" # samarthan (support)
+    - "प्रोत्साहन" # protsahan (encouragement)
+    - "आविष्कार" # aabishkar (invention)
+    - "सिर्जना" # sirjana (creation)
+    - "नयाँ" # naya (new)
+    - "ताजा" # taja (fresh)
+    - "स्वस्थ" # swastha (healthy)
+    - "निरोगी" # nirogi (healthy)
+    - "बलियो" # baliyo (strong)
+    - "सक्षम" # saksham (capable)
+    - "दक्ष" # daksha (skilled)
+    - "अनुभवी" # anubhabi (experienced)
+    - "प्रतिभा" # pratibha (talent)
+    - "क्षमता" # kshamata (capability)
+    - "गुणस्तर" # gunastar (quality)
+    - "राम्रा" # ramra (good - pl)
+    - "राम्री" # ramri (good - f)
+    - "असल" # asal (good/honest)
+    - "इमानदार" # imandar (honest)
+    - "परिश्रमी" # parishrami (hardworking)
+    - "मेहनती" # mehanati (hardworking)
+    - "सहज" # sahaj (easy/comfortable)
+    - "सुविधा" # subidha (facility)
+    - "अवसर" # awasar (opportunity)
+    - "फाइदा" # faida (benefit)
+    - "नाफा" # nafa (profit)
+    - "लाभ" # labh (benefit/gain)
+    - "वृद्धि" # briddhi (growth)
+    - "विस्तार" # bistar (expansion)
+    - "निर्माण" # nirman (construction/creation)
+    - "उद्घाटन" # udghatan (inauguration)
+
+gender:
+  feminine:
+    - "छिन्" # chin
+    - "इन्$" # in
+    - "थिइन" # thiin
+    - "गइन" # gain
+    - "की$" # ki
+    - "गी$" # gi
+    - "उनी" # uni
+    - "उनले" # unale
+    - "महिला" # mahila
+    - "श्रीमती" # shrimati
+    - "बहिनी" # bahini
+    - "आमा" # aama
+    - "दिदी" # didi
+    - "छोरी" # chori
+    - "नानी" # nani
+    - "पत्नी" # patni
+    - "सासू" # sasu
+    - "भाउजू" # bhauju (kinship)
+    - "बुहारी" # buhari (kinship)
+    - "हजुरआमा" # hajurama (kinship)
+    - "माइजु" # maiju (kinship)
+    - "फुपू" # fupu (kinship)
+    - "काकी" # kaki (kinship)
+    - "सानीमा" # sanima (kinship)
+    - "ठूलीमा" # thulima (kinship)
+    - "भतिजी" # bhatiji (kinship)
+    - "भान्जी" # bhanji (kinship)
+    - "नातिनी" # natini (kinship)
+    - "केटी" # keti (girl)
+    - "बालिका" # balika (girl)
+    - "किशोरी" # kishori (teen girl)
+    - "युवती" # yubati (young woman)
+    - "नारी" # nari (woman)
+    - "कन्या" # kanya (maiden)
+    - "स्त्री" # stri (woman)
+    - "अध्यक्षा" # adhyaksha (prof. title - f)
+    - "नेत्री" # netri (prof. title - f)
+    - "नायिका" # nayika (prof. title - f)
+    - "गायिका" # gayika (prof. title - f)
+    - "लेखिका" # lekhika (prof. title - f)
+    - "कवयित्री" # kabayitri (prof. title - f)
+    - "शिक्षिका" # shikshika (prof. title - f)
+    - "प्राध्यापिका" # pradhyapika (prof. title - f)
+    - "विदुषी" # bidushi (prof. title - f)
+    - "महारानी" # maharani (royal title - f)
+    - "राजकुमारी" # rajkumari (royal title - f)
+    - "देवी" # devi (goddess)
+    - "माता" # mata (mother)
+    - "गइन्" # gain (verb agreement)
+    - "खाइन्" # khain (verb agreement)
+    - "भनिन्" # bhanin (verb agreement)
+    - "सुनिन्" # sunin (verb agreement)
+    - "देखिन्" # dekhin (verb agreement)
+    - "पढिन्" # padhin (verb agreement)
+    - "लेखिन्" # lekhin (verb agreement)
+    - "खेलिन्" # khelin (verb agreement)
+    - "गरिन्" # garin (verb agreement)
+    - "सकिन्" # sakin (verb agreement)
+    - "बसिन्" # basin (verb agreement)
+    - "उठिन्" # uthin (verb agreement)
+    - "हाँसिन्" # hansin (verb agreement)
+    - "रोइन्" # roin (verb agreement)
+    - "गरेकी" # gareki (verb agreement)
+    - "भएकी" # bhaeki (verb agreement)
+    - "खाएकी" # khaeki (verb agreement)
+    - "सुतेकी" # suteki (verb agreement)
+    - "गएकी" # gaeki (verb agreement)
+    - "आएकी" # aaeki (verb agreement)
+    - "पढेकी" # padheki (verb agreement)
+    - "भनेकी" # bhaneki (verb agreement)
+    - "खेलेकी" # kheleki (verb agreement)
+    - "जितेकी" # jiteki (verb agreement)
+
+  masculine:
+    - "गयो" # gayo
+    - "गरे$" # gare
+    - "उसले" # usle
+    - "उसको" # usko
+    - "दाइ" # dai
+    - "बाबु" # babu
+    - "छोरा" # chora
+    - "श्रीमान" # shriman
+    - "बुबा" # buba
+    - "काका" # kaka
+    - "भाइ" # bhai
+    - "हजुरबुबा" # hajurbuba (kinship)
+    - "बाजे" # baje (kinship)
+    - "मामा" # mama (kinship)
+    - "फुपाजु" # fupaju (kinship)
+    - "स्यानुबा" # syanuba (kinship)
+    - "ठूलोबा" # thuloba (kinship)
+    - "भतिज" # bhatij (kinship)
+    - "भान्जा" # bhanja (kinship)
+    - "नाति" # nati (kinship)
+    - "केटा" # keta (boy)
+    - "बालक" # balak (boy)
+    - "किशोर" # kishor (teen boy)
+    - "युवा" # yuwa (young man)
+    - "पुरुष" # purush (man)
+    - "लोग्ने" # logne (husband)
+    - "पति" # pati (husband)
+    - "अध्यक्ष" # adhyaksha (prof. title - m)
+    - "नेता" # neta (prof. title - m)
+    - "नायक" # nayak (prof. title - m)
+    - "गायक" # gayak (prof. title - m)
+    - "लेखक" # lekhak (prof. title - m)
+    - "कवि" # kabi (prof. title - m)
+    - "शिक्षक" # shikshak (prof. title - m)
+    - "प्राध्यापक" # pradhyapak (prof. title - m)
+    - "विद्वान" # bidwan (prof. title - m)
+    - "महाराजा" # maharaja (royal title - m)
+    - "राजकुमार" # rajkumar (royal title - m)
+    - "देव" # dev (god)
+    - "पिता" # pita (father)
+    - "गएको" # gaeko (verb agreement)
+    - "भएको" # bhaeko (verb agreement)
+    - "खाएको" # khaeko (verb agreement)
+    - "सुतेको" # suteko (verb agreement)
+    - "पढेको" # padheko (verb agreement)
+    - "भनेको" # bhaneko (verb agreement)
+    - "खेलेको" # kheleko (verb agreement)
+    - "जितेको" # jiteko (verb agreement)
+    - "गर्थ्यो" # garthyo (verb agreement)
+    - "गर्दथ्यो" # gardathyo (verb agreement)
+    - "भन्थ्यो" # bhanthyo (verb agreement)
+    - "सुन्थ्यो" # sunthyo (verb agreement)
+    - "देख्थ्यो" # dekhthyo (verb agreement)
+    - "पढ्थ्यो" # padhthyo (verb agreement)
+    - "लेख्थ्यो" # lekhthyo (verb agreement)
+    - "खेल्थ्यो" # khelthyo (verb agreement)
+    - "बस्थ्यो" # basthyo (verb agreement)
+    - "उठ्थ्यो" # uththyo (verb agreement)
+    - "हाँस्थ्यो" # hansthyo (verb agreement)
+    - "रुन्थ्यो" # runthyo (verb agreement)
+    - "मोटा" # mota (adjective - m)
+    - "अग्ला" # agla (adjective - m)
+    - "होचा" # hocha (adjective - m)
+    - "गोरा" # gora (adjective - m)
+    - "काला" # kala (adjective - m)
+
+sector:
+  formal:
+    - "अनुसार" # anusar
+    - "कार्यान्वयन" # karyanwayan
+    - "प्रतिवेदन" # pratibedan
+    - "नियमानुसार" # niyamanusar
+    - "निर्णय" # nirnaya
+    - "विनियम" # biniyam
+    - "संविधान" # sambidhan
+    - "कानून" # kanun
+    - "ऐन" # ain
+    - "नीति" # niti
+    - "योजना" # yojana
+    - "प्रस्ताव" # prastab
+    - "सरकार" # sarakar
+    - "मन्त्रालय" # mantralaya
+    - "विभाग" # bibhag
+    - "कार्यालय" # karyalaya
+    - "अदालत" # adalat
+    - "सर्वोच्च" # sarbocha
+    - "न्यायालय" # nyayalaya
+    - "न्यायाधीश" # nyayadhish
+    - "वकिल" # wakil
+    - "प्रहरी" # prahari
+    - "सेना" # sena
+    - "सशस्त्र" # sashastra
+    - "सुरक्षा" # suraksha
+    - "प्रशासन" # prashasan
+    - "कर्मचारी" # karmachari
+    - "अधिकृत" # adhikrit
+    - "सचिव" # sachib
+    - "मन्त्री" # mantri
+    - "प्रधानमन्त्री" # pradhanmantri
+    - "राष्ट्रपति" # rastrapati
+    - "संसद" # sansad
+    - "विधेयक" # bidheyak
+    - "अध्यादेश" # adhyadesh
+    - "राजपत्र" # rajpatra
+    - "सूचना" # suchana
+    - "विज्ञप्ति" # bigyapti
+    - "निर्देशिका" # nirdeshika
+    - "कार्यविधि" # karyabidhi
+    - "मापदण्ड" # mapadanda
+    - "निर्देशन" # nirdeshan
+    - "आदेश" # aadesh
+    - "फैसला" # faisala
+    - "मुद्दा" # mudda
+    - "सुनुवाइ" # sunuwai
+    - "बजेट" # bajet
+    - "कार्यक्रम" # karyakram
+    - "आयोजना" # aayojana
+    - "परियोजना" # pariyojana
+    - "सम्झौता" # samjhauta
+    - "हस्ताक्षर" # hastakshar
+    - "अनुमोदन" # anumodan
+    - "पारित" # parit
+    - "स्वीकृत" # swikrit
+
+  conversational:
+    - "भन्यो" # bhanyo (said)
+    - "भनिन्" # bhanin (said - f)
+    - "भन्छ" # bhancha (says)
+    - "भन्छन्" # bhanchan (they say)
+    - "सोध्यो" # sodhyo (asked)
+    - "बोल्यो" # bolyo (spoke)
+    - '"' # opening quote
+    - '"' # closing quote
+    - "भन्दै" # bhandai (saying)
+    - "गफ" # gaf (chat/gossip)
+    - "(?:^|\\s)यार(?:\\s|$)" # yaar (friend, informal) — word-boundary
+    - "हैन" # haina (isn't it?)
+    - "होइन" # hoina (no/isn't)
+    - "ओहो" # oho (exclamation)
+    - "आबुइ" # aabui (exclamation)
+    - "भनेर" # bhanera (saying that)
+    - "थाहा" # thaha (know)
+    - "थाहा छैन" # thaha chaina (don't know)
+    - "भेटौँ" # bhetaun (let's meet)
+    - "जाऔँ" # jaaun (let's go)
+    - "गरौँ" # garaun (let's do)
+    - "खाऔँ" # khaaun (let's eat)
+    - "बोर" # bore (boring)
+    - "अल्छी" # alchi (lazy)
+    - "कसरी" # kasari (how - conversational question)
+    - "खै" # khai (where is / I don't know)
+    - "बोलेको" # boleko (spoken)
+    - "कुरा" # kura (talk/matter)
+    - "गफसफ" # gafsaf (chatting)
+    - "हल्ला" # halla (rumor)
+    - "बकबक" # bakbak (chatter)
+
+  sports:
+    - "खेलकुद" # khelkud (sports)
+    - "खेल" # khel (game)
+    - "खेलाडी" # kheladi (player)
+    - "मैदान" # maidan (ground/field)
+    - "रंगशाला" # rangashala (stadium)
+    - "प्रतियोगिता" # pratiyogita (competition)
+    - "टूर्नामेन्ट" # turnament (tournament)
+    - "लिग" # lig (league)
+    - "म्याच" # myach (match)
+    - "जित" # jit (win)
+    - "हार" # haar (loss)
+    - "ड्र" # draw (draw)
+    - "गोल" # gol (goal)
+    - "पोइन्ट" # point (point)
+    - "अंक" # anka (score/points)
+    - "स्कोर" # skor (score)
+    - "पदक" # padak (medal)
+    - "स्वर्ण" # swarna (gold)
+    - "रजत" # rajat (silver)
+    - "कांस्य" # kansya (bronze)
+    - "ट्रफी" # trafi (trophy)
+    - "कप" # kap (cup)
+    - "च्याम्पियन" # chyampiyan (champion)
+    - "विजेता" # bijeta (winner)
+    - "उपविजेता" # upabijeta (runner-up)
+    - "सेमिफाइनल" # semifinal
+    - "फाइनल" # final
+    - "क्वाटरफाइनल" # quarterfinal
+    - "क्रिकेट" # kriket (cricket)
+    - "फुटबल" # futbal (football)
+    - "भलिबल" # bhalibal (volleyball)
+    - "बास्केटबल" # basketbal (basketball)
+    - "मार्सल आर्ट" # marsal art (martial arts)
+    - "एथलेटिक्स" # athletiks (athletics)
+    - "ब्याडमिन्टन" # byadmintan (badminton)
+    - "टेनिस" # tenis (tennis)
+    - "पौडी" # paudi (swimming)
+    - "जिम्न्यास्टिक" # jimnyastik (gymnastics)
+    - "प्रशिक्षक" # prashikshak (coach)
+    - "कोच" # koch (coach)
+    - "कप्तान" # kaptan (captain)
+    - "अम्पायर" # ampayar (umpire)
+    - "रेफ्री" # refri (referee)
+    - "फाउल" # faul (foul)
+    - "पेनाल्टी" # penalti (penalty)
+    - "फ्रीकिक" # frikik (freekick)
+    - "विकेट" # biket (wicket)
+    - "रन" # ran (run)
+    - "ओभर" # obhar (over)
+    - "ब्याटिङ" # byating (batting)
+    - "बलिङ" # baling (bowling)
+    - "फिल्डिङ" # filding (fielding)
+    - "छक्का" # chakka (six)
+    - "चौका" # chauka (four)
+
+  technology:
+    - "प्रविधि" # prabidhi (technology)
+    - "इन्टरनेट" # intarnet (internet)
+    - "कम्प्युटर" # kampyutar (computer)
+    - "मोबाइल" # mobail (mobile)
+    - "स्मार्टफोन" # smartfon (smartphone)
+    - "ल्यापटप" # lyaptap (laptop)
+    - "सफ्टवेयर" # saphtaweyar (software)
+    - "हार्डवेयर" # hardaweyar (hardware)
+    - "एप" # ep (app)
+    - "एप्लिकेसन" # eplikesan (application)
+    - "वेबसाइट" # websait (website)
+    - "अनलाइन" # anlain (online)
+    - "डिजिटल" # dijital (digital)
+    - "सामाजिक सञ्जाल" # samajik sanjal (social media)
+    - "फेसबुक" # fesbuk (facebook)
+    - "ट्विटर" # twitar (twitter)
+    - "इन्स्टाग्राम" # instagram (instagram)
+    - "युट्युब" # yutyub (youtube)
+    - "टिकटक" # tiktak (tiktok)
+    - "गुगल" # gugal (google)
+    - "डेटा" # deta (data)
+    - "डेटाबेस" # detabes (database)
+    - "सर्भर" # sarbhar (server)
+    - "क्लाउड" # klaud (cloud)
+    - "साइबर" # saibar (cyber)
+    - "ह्याकर" # hyakar (hacker)
+    - "ह्याकिङ" # hyaking (hacking)
+    - "भाइरस" # bhairas (virus)
+    - "एन्टिभाइरस" # entibhairas (antivirus)
+    - "सुरक्षा" # suraksha (security)
+    - "पासवर्ड" # pasawarda (password)
+    - "लगइन" # lagin (login)
+    - "अकाउन्ट" # akaunt (account)
+    - "प्रोफाइल" # profail (profile)
+    - "पोस्ट" # post (post)
+    - "कमेन्ट" # kament (comment)
+    - "लाइक" # laik (like)
+    - "सेयर" # seyar (share)
+    - "सब्सक्राइब" # sabaskraib (subscribe)
+    - "नोटिफिकेसन" # notifikesan (notification)
+    - "म्यासेज" # myasej (message)
+    - "च्याट" # chyat (chat)
+    - "भिडियो" # bhidiyo (video)
+    - "अडियो" # adiyo (audio)
+    - "फोटो" # foto (photo)
+    - "क्यामेरा" # kyamera (camera)
+    - "ब्लुटुथ" # blututh (bluetooth)
+    - "वाइफाइ" # waifai (wifi)
+    - "नेटवर्क" # netwark (network)
+    - "टेलिकम" # telikam (telecom)
+    - "सिमकार्ड" # simkard (simcard)
+    - "रिचार्ज" # richarj (recharge)
+    - "ब्यालेन्स" # byalens (balance)
+
+  health:
+    - "स्वास्थ्य" # swasthya (health)
+    - "अस्पताल" # aspatal (hospital)
+    - "क्लिनिक" # klinik (clinic)
+    - "डाक्टर" # daktar (doctor)
+    - "चिकित्सक" # chikitsak (physician)
+    - "नर्स" # nars (nurse)
+    - "बिरामी" # birami (patient)
+    - "रोग" # rog (disease)
+    - "औषधि" # ausadhi (medicine)
+    - "उपचार" # upachar (treatment)
+    - "अपरेसन" # aparesan (operation)
+    - "शल्यक्रिया" # shalyakriya (surgery)
+    - "परीक्षण" # parikshan (test)
+    - "चेकजाँच" # chekjanch (checkup)
+    - "रिपोर्ट" # riport (report)
+    - "भर्ना" # bharna (admit)
+    - "डिस्चार्ज" # discharj (discharge)
+    - "रक्तदान" # raktadan (blood donation)
+    - "रगत" # ragat (blood)
+    - "प्रेसर" # presar (pressure)
+    - "सुगर" # sugar (sugar/diabetes)
+    - "मधुमेह" # madhumeha (diabetes)
+    - "क्यान्सर" # kyansar (cancer)
+    - "मुटु" # mutu (heart)
+    - "मिर्गौला" # mirgaula (kidney)
+    - "कलेजो" # kalejo (liver)
+    - "फोक्सो" # phokso (lungs)
+    - "मस्तिष्क" # mastiska (brain)
+    - "पेट" # pet (stomach)
+    - "आँखा" # aankha (eye)
+    - "कान" # kaan (ear)
+    - "नाक" # naak (nose)
+    - "घाँटी" # ghanti (throat)
+    - "दाँत" # daant (teeth)
+    - "हड्डी" # haddi (bone)
+    - "नशा" # nasha (nerve)
+    - "छाला" # chhaala (skin)
+    - "मानसिक" # manasik (mental)
+    - "शारीरिक" # sharirik (physical)
+    - "पोषण" # poshan (nutrition)
+    - "भिटामिन" # bhitamin (vitamin)
+    - "प्रोटिन" # protin (protein)
+    - "क्याल्सियम" # kyalasiyam (calcium)
+    - "खोप" # khop (vaccine)
+    - "भ्याक्सिन" # bhyaksin (vaccine)
+    - "महामारी" # mahamari (pandemic/epidemic)
+    - "संक्रमण" # sankraman (infection)
+    - "भाइरस" # bhairas (virus)
+    - "ब्याक्टेरिया" # byakteriya (bacteria)
+    - "ज्वरो" # jwaro (fever)
+    - "रुघा" # rugha (cold)
+    - "खोकी" # khoki (cough)
+    - "दुखाइ" # dukhai (pain)
+    - "घाउ" # ghau (wound)
+    - "चोट" # chot (injury)
+
+  business:
+    - "अर्थतन्त्र" # arthatantra (economy)
+    - "व्यापार" # byapar (trade)
+    - "व्यवसाय" # byabasaya (business)
+    - "कम्पनी" # kampani (company)
+    - "उद्योग" # udhyog (industry)
+    - "कारखाना" # karkhana (factory)
+    - "बजार" # bajar (market)
+    - "पसल" # pasal (shop)
+    - "ग्राहक" # grahak (customer)
+    - "उपभोक्ता" # upabhokta (consumer)
+    - "मूल्य" # mulya (price)
+    - "भाउ" # bhau (rate)
+    - "रकम" # rakam (amount)
+    - "पैसा" # paisa (money)
+    - "रुपैयाँ" # rupaiya (rupees)
+    - "डलर" # dalar (dollar)
+    - "बैंक" # baink (bank)
+    - "वित्तीय" # bittiya (financial)
+    - "संस्था" # sanstha (institution)
+    - "ऋण" # rin (loan)
+    - "कर्जा" # karja (loan)
+    - "ब्याज" # byaj (interest)
+    - "बचत" # bachat (saving)
+    - "निक्षेप" # nikshep (deposit)
+    - "खाता" # khata (account)
+    - "चेक" # chek (check)
+    - "एटिएम" # etiem (ATM)
+    - "सेयर" # seyar (share)
+    - "स्टक" # stak (stock)
+    - "नेप्से" # nepse (NEPSE)
+    - "लगानी" # lagani (investment)
+    - "प्रतिफल" # pratiphal (return)
+    - "लाभांश" # labhansa (dividend)
+    - "बोनस" # bonas (bonus)
+    - "नाफा" # nafa (profit)
+    - "घाटा" # ghata (loss)
+    - "नोक्सान" # noksan (loss)
+    - "आम्दानी" # amdani (income)
+    - "कमाई" # kamai (earnings)
+    - "खर्च" # kharcha (expense)
+    - "बजेट" # bajet (budget)
+    - "कर" # kar (tax)
+    - "राजस्व" # rajaswa (revenue)
+    - "भन्सार" # bhansar (customs)
+    - "आयात" # aayat (import)
+    - "निर्यात" # niryat (export)
+    - "उत्पादन" # utpadan (production)
+    - "वितरण" # bitaran (distribution)
+    - "माग" # maag (demand)
+    - "आपूर्ति" # aapurti (supply)
+    - "महँगी" # mahangi (inflation)
+    - "मुद्रास्फीति" # mudrasphiti (inflation)
+    - "आर्थिक" # aarthik (economic)
+    - "वृद्धि" # briddhi (growth)
+
+  entertainment:
+    - "मनोरञ्जन" # manoranjan (entertainment)
+    - "चलचित्र" # chalachitra (movie)
+    - "फिल्म" # film (film)
+    - "सिनेमा" # sinema (cinema)
+    - "हल" # hal (hall)
+    - "नाटक" # natak (drama)
+    - "थिएटर" # thiyetar (theater)
+    - "गीत" # git (song)
+    - "संगीत" # sangit (music)
+    - "गायक" # gayak (singer m)
+    - "गायिका" # gayika (singer f)
+    - "संगीतकार" # sangitakar (musician)
+    - "रचनाकार" # rachanakara (composer)
+    - "भिडियो" # bhidiyo (video)
+    - "एल्बम" # elbam (album)
+    - "कन्सर्ट" # kansart (concert)
+    - "लाइभ" # laibh (live)
+    - "नृत्य" # nritya (dance)
+    - "डान्स" # dans (dance)
+    - "कलाकार" # kalakar (artist)
+    - "नायक" # nayak (actor)
+    - "नायिका" # nayika (actress)
+    - "निर्देशक" # nirdeshak (director)
+    - "निर्माता" # nirmata (producer)
+    - "कथा" # katha (story)
+    - "पटकथा" # patakatha (screenplay)
+    - "संवाद" # sambad (dialogue)
+    - "सुटिङ" # suting (shooting)
+    - "छायांकन" # chhayankan (filming)
+    - "सम्पादन" # sampadan (editing)
+    - "डबिङ" # dabing (dubbing)
+    - "रिलिज" # rilij (release)
+    - "प्रदर्शन" # pradarshan (screening)
+    - "दर्शक" # darshak (audience)
+    - "श्रोता" # shrota (listener)
+    - "फ्यान" # phyan (fan)
+    - "समर्थक" # samarthak (supporter)
+    - "प्रशंसक" # prashansak (admirer)
+    - "समीक्षा" # samiksha (review)
+    - "रेटिङ" # reting (rating)
+    - "हिट" # hit (hit)
+    - "फ्लप" # phlap (flop)
+    - "बक्स अफिस" # baks aphis (box office)
+    - "कमाइ" # kamai (earnings)
+    - "पारिश्रमिक" # parishramik (remuneration)
+    - "गसिप" # gasip (gossip)
+    - "स्क्यान्डल" # skyandal (scandal)
+    - "विवाद" # bibad (controversy)
+    - "अन्तर्वार्ता" # antarwarta (interview)
+    - "शो" # sho (show)
+    - "रियालिटी शो" # riyaliti sho (reality show)
+    - "टिभी" # tibhi (TV)
+    - "च्यानल" # chyanal (channel)
+    - "रेडियो" # rediyo (radio)
+    - "एफएम" # eph em (FM)
+
+  education:
+    - "शिक्षा" # shiksha (education)
+    - "शिक्षण" # shikshan (teaching)
+    - "सिकाइ" # sikai (learning)
+    - "विद्यालय" # bidyalaya (school)
+    - "स्कुल" # skul (school)
+    - "कलेज" # kalej (college)
+    - "क्याम्पस" # kyampas (campus)
+    - "विश्वविद्यालय" # bishwobidyalaya (university)
+    - "संस्थान" # sansthan (institute)
+    - "प्रतिष्ठान" # pratisthan (academy)
+    - "विद्यार्थी" # bidyarthi (student)
+    - "छात्र" # chhatra (male student)
+    - "छात्रा" # chhatra (female student)
+    - "शिक्षक" # shikshak (teacher)
+    - "शिक्षिका" # shikshika (female teacher)
+    - "गुरु" # guru (teacher)
+    - "प्राध्यापक" # pradhyapak (professor)
+    - "प्रोफेसर" # prophesar (professor)
+    - "प्रधानाध्यापक" # pradhanadhyapak (headmaster)
+    - "प्रिन्सिपल" # prinsipala (principal)
+    - "कक्षा" # kaksha (class)
+    - "कोठा" # kotha (room)
+    - "किताब" # kitab (book)
+    - "पुस्तक" # pustak (book)
+    - "कापी" # kapi (notebook)
+    - "कलम" # kalam (pen)
+    - "परीक्षा" # pariksha (exam)
+    - "जाँच" # jaanch (test)
+    - "नतिजा" # natija (result)
+    - "रिजल्ट" # rijalt (result)
+    - "मार्कसिट" # marksit (marksheet)
+    - "सर्टिफिकेट" # sartifiket (certificate)
+    - "प्रमाणपत्र" # pramanpatra (certificate)
+    - "डिग्री" # digri (degree)
+    - "ब्याचलर्स" # byachalars (bachelors)
+    - "मास्टर्स" # mastars (masters)
+    - "पिएचडी" # pichdi (phd)
+    - "छात्रवृत्ति" # chhatrabritti (scholarship)
+    - "स्कलरसिप" # skalarasip (scholarship)
+    - "शुल्क" # shulka (fee)
+    - "फी" # phi (fee)
+    - "भर्ना" # bharna (admission)
+    - "एडमिसन" # edamisan (admission)
+    - "पाठ्यक्रम" # pathyakram (curriculum)
+    - "सिलबस" # silabas (syllabus)
+    - "विषय" # bishaya (subject)
+    - "विज्ञान" # bigyan (science)
+    - "गणित" # ganit (mathematics)
+    - "अंग्रेजी" # angreji (english)
+    - "नेपाली" # nepali (nepali)
+    - "इतिहास" # itihas (history)
+    - "भूगोल" # bhugol (geography)
+    - "अर्थशास्त्र" # arthashastra (economics)
+    - "व्यवस्थापन" # byabasthapan (management)
+    - "मानविकी" # manabiki (humanities)
+    - "शिक्षाशास्त्र" # shikshashastra (education faculty)
