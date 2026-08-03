@@ -133,6 +133,7 @@ def cmd_run_batch(args):
             max_shards=args.max_shards,
             min_syllables=args.min_syllables,
             max_syllables=args.max_syllables,
+            max_workers=getattr(args, "workers", None),
         )
     else:
         print(f"\n▸ Stage 1: Pool already exists ({len(pool_files)} chunks). "
@@ -148,7 +149,8 @@ def cmd_run_batch(args):
     if needs_annotation:
         print("\n▸ Stage 2: Annotating pool with metadata...")
         rules_path = Path(args.rules) if args.rules else None
-        annotate_pool(_POOL_DIR, rules_path=rules_path, max_chunks=max_chunks)
+        annotate_pool(_POOL_DIR, rules_path=rules_path, max_chunks=max_chunks,
+                      max_workers=getattr(args, "workers", None))
         # Reload after annotation
         pool_records = _load_pool(max_records=max_pool_records)
     else:
@@ -359,6 +361,8 @@ Examples:
     p_batch.add_argument("--seed", type=int, default=42, help="Random seed")
     p_batch.add_argument("--force-extract", action="store_true",
                          help="Force re-extraction even if pool exists")
+    p_batch.add_argument("--workers", type=int, default=None,
+                         help="Parallel worker processes (default: CPU count)")
     p_batch.set_defaults(func=cmd_run_batch)
 
     # ---- analyze ----
