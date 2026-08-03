@@ -64,10 +64,23 @@ def _save_state(state: dict):
     print(f"  State saved: {_STATE_FILE}")
 
 
-def _load_pool(max_records: int | None = 1_000_000) -> list[dict]:
-    """Load pool records from JSONL chunks up to max_records."""
+def _load_pool_file_worker(pf_str: str) -> list[dict]:
+    """Read one pool chunk JSONL file (top-level for ProcessPoolExecutor)."""
     records = []
-    pool_files = sorted(_POOL_DIR.glob("pool_chunk_*.jsonl"))
+    with open(pf_str, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                records.append(json.loads(line))
+    return records
+
+
+def _load_pool_sequential(
+    pool_files: list[Path],
+    max_records: int | None,
+) -> list[dict]:
+    """Load pool chunks one file at a time, stopping early when max_records is reached."""
+    records = []
     for pf in pool_files:
         with open(pf, "r", encoding="utf-8") as f:
             for line in f:
@@ -76,6 +89,61 @@ def _load_pool(max_records: int | None = 1_000_000) -> list[dict]:
                     records.append(json.loads(line))
                     if max_records and len(records) >= max_records:
                         return records
+    return records
+
+
+def _load_pool(
+    max_records: int | None = 1_000_000,
+    *,
+    max_workers: int | None = None,
+    show_progress: bool = True,
+) -> list[dict]:
+    """Load pool records from JSONL chunks, using parallel I/O when beneficial."""
+    import os
+    from concurrent.futures import ProcessPoolExecutor
+
+    pool_files = sorted(_POOL_DIR.glob("pool_chunk_*.jsonl"))
+    if not pool_files:
+        return []
+
+    if max_workers is None:
+        max_workers = os.cpu_count() or 4
+    max_workers = max(1, max_workers)
+
+    # Single file or single worker — sequential is simpler
+    if len(pool_files) == 1 or max_workers <= 1:
+        return _load_pool_sequential(pool_files, max_records)
+
+    # Small cap — sequential early-stop avoids reading the entire corpus
+    if max_records and max_records <= 50_000:
+        return _load_pool_sequential(pool_files, max_records)
+
+    workers = min(max_workers, len(pool_files))
+    print(f"▸ Loading {len(pool_files)} pool chunks using {workers} parallel processes...")
+
+    try:
+        from tqdm import tqdm
+        use_tqdm = show_progress
+    except ImportError:
+        use_tqdm = False
+
+    tasks = [str(pf) for pf in pool_files]
+    with ProcessPoolExecutor(max_workers=workers) as executor:
+        if use_tqdm:
+            chunks = list(tqdm(
+                executor.map(_load_pool_file_worker, tasks),
+                total=len(tasks),
+                desc="Loading pool chunks",
+                unit=" file",
+            ))
+        else:
+            chunks = list(executor.map(_load_pool_file_worker, tasks))
+
+    records: list[dict] = []
+    for chunk_records in chunks:
+        records.extend(chunk_records)
+        if max_records and len(records) >= max_records:
+            return records[:max_records]
     return records
 
 
@@ -143,7 +211,10 @@ def cmd_run_batch(args):
     max_chunks = None if (args.max_chunks is not None and args.max_chunks <= 0) else args.max_chunks
     max_pool_records = None if (args.max_pool_records is not None and args.max_pool_records <= 0) else args.max_pool_records
 
-    pool_records = _load_pool(max_records=max_pool_records)
+    pool_records = _load_pool(
+        max_records=max_pool_records,
+        max_workers=getattr(args, "workers", None),
+    )
     needs_annotation = any("tense" not in r for r in pool_records[:10])
 
     if needs_annotation:
@@ -152,7 +223,10 @@ def cmd_run_batch(args):
         annotate_pool(_POOL_DIR, rules_path=rules_path, max_chunks=max_chunks,
                       max_workers=getattr(args, "workers", None))
         # Reload after annotation
-        pool_records = _load_pool(max_records=max_pool_records)
+        pool_records = _load_pool(
+            max_records=max_pool_records,
+            max_workers=getattr(args, "workers", None),
+        )
     else:
         print("\n▸ Stage 2: Pool already annotated. Skipping.")
 
@@ -165,6 +239,7 @@ def cmd_run_batch(args):
         target_size=target_size,
         corpus_state=state,
         seed=args.seed,
+        max_workers=getattr(args, "workers", None),
     )
 
     if not selected:

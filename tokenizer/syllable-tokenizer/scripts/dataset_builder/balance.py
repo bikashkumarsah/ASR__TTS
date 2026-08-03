@@ -61,6 +61,195 @@ def _syllable_deficit_score(
     return score
 
 
+def _pick_best_from_cell_worker(args_tuple: tuple) -> tuple:
+    """Score a sample of candidates for one metadata cell (ProcessPool worker)."""
+    cell, sample_records, freq_dict, target_per_syl = args_tuple
+    if not sample_records:
+        return cell, None
+
+    freq = Counter(freq_dict)
+    best_rec = None
+    best_score = -1.0
+    for rec in sample_records:
+        score = _syllable_deficit_score(rec, freq, target_per_syl)
+        if score > best_score:
+            best_score = score
+            best_rec = rec
+    return cell, best_rec
+
+
+def _remove_from_cell_pool(cell_pools: dict[tuple, list[dict]], cell: tuple, chosen: dict) -> None:
+    """Remove a chosen record from a cell pool by pool_id."""
+    pool = cell_pools.get(cell, [])
+    pid = chosen.get("pool_id")
+    for i, rec in enumerate(pool):
+        if rec.get("pool_id") == pid:
+            pool.pop(i)
+            return
+
+
+def _apply_selection(
+    chosen: dict,
+    cell: tuple,
+    *,
+    selected: list[dict],
+    cell_pools: dict[tuple, list[dict]],
+    cell_selected_counts: dict[tuple, int],
+    cumulative_syl_freq: Counter,
+) -> None:
+    """Commit one chosen record and update cumulative syllable counts."""
+    _remove_from_cell_pool(cell_pools, cell, chosen)
+    selected.append(chosen)
+    cell_selected_counts[cell] += 1
+    for tok in chosen.get("syllables", []):
+        if tok not in _SKIP_TOKENS:
+            cumulative_syl_freq[tok] += 1
+
+
+def _select_sequential(
+    *,
+    target_size: int,
+    cells_queue: list[tuple],
+    cell_pools: dict[tuple, list[dict]],
+    cumulative_syl_freq: Counter,
+    target_per_syl: float,
+    cell_selected_counts: dict[tuple, int],
+    show_progress: bool,
+) -> list[dict]:
+    """Original single-threaded round-robin greedy selection."""
+    selected: list[dict] = []
+
+    try:
+        from tqdm import tqdm
+        pbar = tqdm(total=target_size, desc="Selecting", unit=" sents") if show_progress else None
+    except ImportError:
+        pbar = None
+
+    rounds = 0
+    max_rounds = target_size * 2
+    while len(selected) < target_size and rounds < max_rounds:
+        rounds += 1
+        progress_made = False
+
+        for cell in cells_queue:
+            if len(selected) >= target_size:
+                break
+
+            pool = cell_pools.get(cell, [])
+            if not pool:
+                continue
+
+            best_idx = -1
+            best_score = -1.0
+            sample_size = min(len(pool), 200)
+            sample_indices = random.sample(range(len(pool)), sample_size)
+
+            for idx in sample_indices:
+                rec = pool[idx]
+                score = _syllable_deficit_score(rec, cumulative_syl_freq, target_per_syl)
+                if score > best_score:
+                    best_score = score
+                    best_idx = idx
+
+            if best_idx >= 0:
+                chosen = pool[best_idx]
+                _apply_selection(
+                    chosen, cell,
+                    selected=selected,
+                    cell_pools=cell_pools,
+                    cell_selected_counts=cell_selected_counts,
+                    cumulative_syl_freq=cumulative_syl_freq,
+                )
+                progress_made = True
+                if pbar:
+                    pbar.update(1)
+
+        if not progress_made:
+            break
+
+    if pbar:
+        pbar.close()
+    return selected
+
+
+def _select_parallel_rounds(
+    *,
+    target_size: int,
+    cells_queue: list[tuple],
+    cell_pools: dict[tuple, list[dict]],
+    cumulative_syl_freq: Counter,
+    target_per_syl: float,
+    cell_selected_counts: dict[tuple, int],
+    max_workers: int,
+    show_progress: bool,
+) -> list[dict]:
+    """Round-parallel greedy: all metadata cells pick concurrently each round.
+
+    Each round snapshots cumulative syllable frequencies, scores cells in
+    parallel, then merges picks and updates global state.  This preserves
+    metadata round-robin stratification while parallelizing the scoring work.
+    """
+    import os
+    from concurrent.futures import ProcessPoolExecutor
+
+    selected: list[dict] = []
+    workers = max(1, max_workers)
+
+    try:
+        from tqdm import tqdm
+        pbar = tqdm(total=target_size, desc="Selecting (parallel)", unit=" sents") if show_progress else None
+    except ImportError:
+        pbar = None
+
+    print(f"▸ Parallel selection: {workers} workers, round-robin across metadata cells")
+
+    rounds = 0
+    max_rounds = target_size * 2
+    freq_snapshot = dict(cumulative_syl_freq)
+
+    while len(selected) < target_size and rounds < max_rounds:
+        rounds += 1
+        tasks = []
+
+        for cell in cells_queue:
+            pool = cell_pools.get(cell, [])
+            if not pool:
+                continue
+            sample_size = min(len(pool), 200)
+            sample = random.sample(pool, sample_size)
+            tasks.append((cell, sample, freq_snapshot, target_per_syl))
+
+        if not tasks:
+            break
+
+        with ProcessPoolExecutor(max_workers=min(workers, len(tasks))) as executor:
+            results = list(executor.map(_pick_best_from_cell_worker, tasks))
+
+        progress_made = False
+        for cell, chosen in results:
+            if chosen is None or len(selected) >= target_size:
+                continue
+            _apply_selection(
+                chosen, cell,
+                selected=selected,
+                cell_pools=cell_pools,
+                cell_selected_counts=cell_selected_counts,
+                cumulative_syl_freq=cumulative_syl_freq,
+            )
+            progress_made = True
+            if pbar:
+                pbar.update(1)
+
+        if not progress_made:
+            break
+
+        freq_snapshot = dict(cumulative_syl_freq)
+
+    if pbar:
+        pbar.close()
+    return selected
+
+
 def select_balanced_batch(
     pool_records: list[dict],
     target_size: int = 5000,
@@ -69,6 +258,7 @@ def select_balanced_batch(
     metadata_tolerance: float = 0.05,
     seed: int | None = 42,
     show_progress: bool = True,
+    max_workers: int | None = None,
 ) -> tuple[list[dict], dict]:
     """Select a balanced batch from annotated pool records.
 
@@ -79,6 +269,7 @@ def select_balanced_batch(
     corpus_state : existing corpus_state.json (cumulative state)
     metadata_tolerance : ±fraction tolerance for metadata balance
     seed : random seed for reproducibility
+    max_workers : parallel processes for round-robin scoring (defaults to CPU count)
 
     Returns
     -------
@@ -132,64 +323,34 @@ def select_balanced_batch(
     selected: list[dict] = []
     cell_selected_counts: dict[tuple, int] = defaultdict(int)
 
-    try:
-        from tqdm import tqdm
-        pbar = tqdm(total=target_size, desc="Selecting", unit=" sents") if show_progress else None
-    except ImportError:
-        pbar = None
-
-    # Phase 1: Fill minimum per cell (metadata stratification)
     cells_queue = list(active_cells)
     random.shuffle(cells_queue)
 
-    rounds = 0
-    max_rounds = target_size * 2  # safety valve
-    while len(selected) < target_size and rounds < max_rounds:
-        rounds += 1
-        progress_made = False
+    import os
+    workers = max_workers if max_workers is not None else (os.cpu_count() or 4)
+    use_parallel = workers > 1 and len(active_cells) > 1
 
-        for cell in cells_queue:
-            if len(selected) >= target_size:
-                break
-
-            pool = cell_pools.get(cell, [])
-            if not pool:
-                continue
-
-            # Score candidates by syllable deficit
-            best_idx = -1
-            best_score = -1.0
-
-            # Sample at most 200 candidates to keep it fast
-            sample_size = min(len(pool), 200)
-            sample_indices = random.sample(range(len(pool)), sample_size)
-
-            for idx in sample_indices:
-                rec = pool[idx]
-                score = _syllable_deficit_score(rec, cumulative_syl_freq, target_per_syl)
-                if score > best_score:
-                    best_score = score
-                    best_idx = idx
-
-            if best_idx >= 0:
-                chosen = pool.pop(best_idx)
-                selected.append(chosen)
-                cell_selected_counts[cell] += 1
-                progress_made = True
-
-                # Update cumulative syllable frequency
-                for tok in chosen.get("syllables", []):
-                    if tok not in _SKIP_TOKENS:
-                        cumulative_syl_freq[tok] += 1
-
-                if pbar:
-                    pbar.update(1)
-
-        if not progress_made:
-            break
-
-    if pbar:
-        pbar.close()
+    if use_parallel:
+        selected = _select_parallel_rounds(
+            target_size=target_size,
+            cells_queue=cells_queue,
+            cell_pools=cell_pools,
+            cumulative_syl_freq=cumulative_syl_freq,
+            target_per_syl=target_per_syl,
+            cell_selected_counts=cell_selected_counts,
+            max_workers=workers,
+            show_progress=show_progress,
+        )
+    else:
+        selected = _select_sequential(
+            target_size=target_size,
+            cells_queue=cells_queue,
+            cell_pools=cell_pools,
+            cumulative_syl_freq=cumulative_syl_freq,
+            target_per_syl=target_per_syl,
+            cell_selected_counts=cell_selected_counts,
+            show_progress=show_progress,
+        )
 
     # ---- Step 5: Build updated corpus state ----
     new_selected_ids = [r["pool_id"] for r in selected]
