@@ -462,6 +462,66 @@ def _dedup_partition(args_tuple: tuple) -> dict:
     return stats
 
 
+def _write_pool_partition_worker(args_tuple: tuple) -> dict:
+    """Write one deduped partition file into pool chunks (parallel merge phase 3)."""
+    (
+        dedup_path,
+        output_dir,
+        start_global_id,
+        start_chunk_idx,
+        chunk_size,
+        max_records,
+        hash_sidecar,
+    ) = args_tuple
+
+    output_dir = Path(output_dir)
+    chunk_idx = start_chunk_idx
+    global_id = start_global_id
+    accepted = 0
+    buffer_lines: list[str] = []
+
+    def _flush() -> None:
+        nonlocal chunk_idx, buffer_lines
+        if not buffer_lines:
+            return
+        chunk_file = output_dir / f"pool_chunk_{chunk_idx:04d}.jsonl"
+        with open(chunk_file, "w", encoding="utf-8") as out_f:
+            out_f.writelines(buffer_lines)
+        chunk_idx += 1
+        buffer_lines = []
+
+    with open(dedup_path, "r", encoding="utf-8") as in_f, \
+         open(hash_sidecar, "w", encoding="utf-8") as hash_f:
+        for line in in_f:
+            if max_records is not None and accepted >= max_records:
+                break
+            rec = json.loads(line)
+            h = rec.pop("_dedup_hash", None) or _text_hash(rec["text"])
+            hash_f.write(h + "\n")
+            rec["pool_id"] = f"pool_{global_id:08d}"
+            global_id += 1
+            accepted += 1
+            buffer_lines.append(json.dumps(rec, ensure_ascii=False) + "\n")
+            if len(buffer_lines) >= chunk_size:
+                _flush()
+
+    _flush()
+    return {
+        "accepted": accepted,
+        "end_chunk_idx": chunk_idx,
+        "end_global_id": global_id,
+    }
+
+
+def _load_hash_sidecar(hash_path: str, seen_hashes: set[str]) -> None:
+    """Load dedup hashes from a sidecar file into seen_hashes."""
+    with open(hash_path, "r", encoding="utf-8") as f:
+        for line in f:
+            h = line.strip()
+            if h:
+                seen_hashes.add(h)
+
+
 def _parallel_merge_temp_files(
     temp_files: list[Path],
     *,
@@ -486,7 +546,9 @@ def _parallel_merge_temp_files(
     except ImportError:
         use_tqdm = False
 
-    num_partitions = min(max_workers, 32)
+    # Match the requested worker count so all cloud-allocated CPU cores can
+    # participate in hash-partitioned deduplication and chunk writing.
+    num_partitions = max(1, max_workers)
     partition_dir = output_dir / "_merge_partitions"
     dedup_dir = output_dir / "_merge_deduped"
     partition_dir.mkdir(parents=True, exist_ok=True)
@@ -509,64 +571,89 @@ def _parallel_merge_temp_files(
         (p, str(partition_dir), str(dedup_dir / f"partition_{p:03d}.jsonl"))
         for p in range(num_partitions)
     ]
+    partition_counts: list[int] = []
     with ProcessPoolExecutor(max_workers=num_partitions) as executor:
-        futures = [executor.submit(_dedup_partition, t) for t in dedup_tasks]
-        iterable = as_completed(futures)
         if use_tqdm:
-            iterable = tqdm(iterable, total=len(futures), desc="Dedup partitions", unit=" part")
-        for fut in iterable:
-            pstats = fut.result()
-            stats["duplicates"] += pstats["duplicates"]
+            pstats_list = list(tqdm(
+                executor.map(_dedup_partition, dedup_tasks),
+                total=len(dedup_tasks),
+                desc="Dedup partitions",
+                unit=" part",
+            ))
+        else:
+            pstats_list = list(executor.map(_dedup_partition, dedup_tasks))
 
-    # Phase 3: write deduped partitions to pool chunks (sequential, no hashing)
-    print("▸ Merge phase 3/3: writing pool chunks...")
-    chunk_idx = start_chunk_idx
-    global_id = start_global_id
-    buffer: list[dict] = []
+    for pstats in pstats_list:
+        partition_counts.append(pstats["accepted"])
+        stats["duplicates"] += pstats["duplicates"]
 
-    def _flush():
-        nonlocal chunk_idx, buffer
-        if not buffer:
-            return
-        chunk_file = output_dir / f"pool_chunk_{chunk_idx:04d}.jsonl"
-        with open(chunk_file, "w", encoding="utf-8") as f:
-            for rec in buffer:
-                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-        chunk_idx += 1
-        buffer = []
+    dedup_files = [dedup_dir / f"partition_{p:03d}.jsonl" for p in range(num_partitions)]
 
-    dedup_files = sorted(dedup_dir.glob("partition_*.jsonl"))
-    write_iter = dedup_files
-    if use_tqdm:
-        write_iter = tqdm(dedup_files, desc="Writing pool chunks", unit=" part")
+    # Phase 3: write pool chunks in parallel (one worker per partition)
+    total_accepted = sum(partition_counts)
+    print(f"▸ Merge phase 3/3: writing {total_accepted:,} records to pool chunks in parallel...")
 
-    for dedup_file in write_iter:
-        with open(dedup_file, "r", encoding="utf-8") as f:
-            for line in f:
-                if max_sentences is not None and stats["accepted"] >= max_sentences:
-                    break
-                rec = json.loads(line)
-                h = rec.pop("_dedup_hash", None) or _text_hash(rec["text"])
-                seen_hashes.add(h)
+    prefix_global_id = [start_global_id]
+    prefix_chunk_idx = [start_chunk_idx]
+    for count in partition_counts:
+        prefix_global_id.append(prefix_global_id[-1] + count)
+        prefix_chunk_idx.append(
+            prefix_chunk_idx[-1] + ((count + chunk_size - 1) // chunk_size if count else 0)
+        )
 
-                rec["pool_id"] = f"pool_{global_id:08d}"
-                global_id += 1
-                buffer.append(rec)
-                stats["accepted"] += 1
-                source_stats["accepted"] += 1
+    hash_dir = output_dir / "_merge_hashes"
+    hash_dir.mkdir(parents=True, exist_ok=True)
 
-                if len(buffer) >= chunk_size:
-                    _flush()
+    write_tasks = []
+    remaining = max_sentences
+    for p, dedup_file in enumerate(dedup_files):
+        if not partition_counts[p]:
+            continue
+        take = partition_counts[p]
+        if max_sentences is not None:
+            if remaining is not None and remaining <= 0:
+                break
+            take = min(take, remaining)
+            remaining -= take
+        write_tasks.append((
+            str(dedup_file),
+            str(output_dir),
+            prefix_global_id[p],
+            prefix_chunk_idx[p],
+            chunk_size,
+            take if max_sentences is not None else None,
+            str(hash_dir / f"partition_{p:03d}.hashes"),
+        ))
 
-        if max_sentences is not None and stats["accepted"] >= max_sentences:
-            break
+    end_chunk_idx = start_chunk_idx
+    end_global_id = start_global_id
+    if write_tasks:
+        with ProcessPoolExecutor(max_workers=min(max_workers, len(write_tasks))) as executor:
+            if use_tqdm:
+                write_results = list(tqdm(
+                    executor.map(_write_pool_partition_worker, write_tasks),
+                    total=len(write_tasks),
+                    desc="Writing pool chunks",
+                    unit=" part",
+                ))
+            else:
+                write_results = list(executor.map(_write_pool_partition_worker, write_tasks))
 
-    _flush()
+        for wr in write_results:
+            stats["accepted"] += wr["accepted"]
+            source_stats["accepted"] += wr["accepted"]
+            end_chunk_idx = max(end_chunk_idx, wr["end_chunk_idx"])
+            end_global_id = max(end_global_id, wr["end_global_id"])
+
+    # Load hash sidecars for downstream compiled/book dedup
+    for hash_file in sorted(hash_dir.glob("*.hashes")):
+        _load_hash_sidecar(str(hash_file), seen_hashes)
 
     shutil.rmtree(partition_dir, ignore_errors=True)
     shutil.rmtree(dedup_dir, ignore_errors=True)
+    shutil.rmtree(hash_dir, ignore_errors=True)
 
-    return chunk_idx, global_id
+    return end_chunk_idx, end_global_id
 
 
 def _extract_parquet_parallel(
@@ -786,7 +873,7 @@ def extract_pool(
     chunk_idx = 0
     buffer: list[dict] = []
 
-    # Parallel parquet extraction (uses all cores; dedup merge is single-threaded)
+    # Parallel parquet extraction + parallel hash-partitioned merge
     if nepali_corpus_resolved is not None and max_workers > 1:
         stats["by_source"]["nepali_corpus"] = {"raw": 0, "accepted": 0}
         chunk_idx, global_id = _extract_parquet_parallel(

@@ -78,6 +78,161 @@ def _pick_best_from_cell_worker(args_tuple: tuple) -> tuple:
     return cell, best_rec
 
 
+def _reservoir_add(
+    pool: list[dict],
+    record: dict,
+    seen: int,
+    max_size: int,
+    rng: random.Random,
+) -> None:
+    """Reservoir-sample a record into a fixed-size pool."""
+    if max_size <= 0:
+        return
+    if len(pool) < max_size:
+        pool.append(record)
+    else:
+        j = rng.randint(0, seen - 1)
+        if j < max_size:
+            pool[j] = record
+
+
+def _merge_cell_pools(
+    target: dict[tuple, list[dict]],
+    source: dict[tuple, list[dict]],
+    max_per_cell: int,
+    rng: random.Random,
+) -> None:
+    """Merge worker cell pools and cap each cell with reservoir subsampling."""
+    for cell, recs in source.items():
+        if cell not in target:
+            target[cell] = []
+        pool = target[cell]
+        for rec in recs:
+            _reservoir_add(pool, rec, len(pool) + 1, max_per_cell, rng)
+        if len(pool) > max_per_cell:
+            target[cell] = rng.sample(pool, max_per_cell)
+
+
+def _stream_pool_files_worker(args_tuple: tuple) -> dict[tuple, list[dict]]:
+    """Stream a subset of pool chunk files; reservoir-sample per metadata cell."""
+    file_paths, selected_ids, max_per_cell, seed = args_tuple
+    rng = random.Random(seed)
+    selected_set = frozenset(selected_ids)
+    cell_pools: dict[tuple, list[dict]] = defaultdict(list)
+    cell_counts: dict[tuple, int] = defaultdict(int)
+
+    for pf in file_paths:
+        with open(pf, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                rec = json.loads(line)
+                if rec.get("pool_id") in selected_set:
+                    continue
+                cell = _cell_key(rec)
+                cell_counts[cell] += 1
+                _reservoir_add(cell_pools[cell], rec, cell_counts[cell], max_per_cell, rng)
+
+    return dict(cell_pools)
+
+
+def build_cell_pools_streaming(
+    pool_dir: str | Path,
+    selected_ids: set[str] | frozenset[str],
+    *,
+    max_per_cell: int = 2000,
+    seed: int | None = 42,
+    max_workers: int | None = None,
+    show_progress: bool = True,
+) -> dict[tuple, list[dict]]:
+    """Build metadata cell pools by streaming chunk files (memory-safe).
+
+    Uses reservoir sampling so RAM stays bounded (~max_per_cell × num_cells)
+    even when the on-disk pool has 100M+ sentences.
+    """
+    import os
+    from concurrent.futures import ProcessPoolExecutor
+
+    pool_dir = Path(pool_dir)
+    pool_files = sorted(pool_dir.glob("pool_chunk_*.jsonl"))
+    if not pool_files:
+        return {}
+
+    if max_workers is None:
+        max_workers = os.cpu_count() or 4
+    max_workers = max(1, max_workers)
+
+    print(
+        f"▸ Streaming {len(pool_files)} pool chunks "
+        f"(max {max_per_cell} candidates/cell, RAM-safe)..."
+    )
+
+    try:
+        from tqdm import tqdm
+        use_tqdm = show_progress
+    except ImportError:
+        use_tqdm = False
+
+    rng = random.Random(seed)
+    selected_list = list(selected_ids)
+
+    # Sequential path for small pools or single worker
+    if len(pool_files) <= 4 or max_workers <= 1:
+        cell_pools: dict[tuple, list[dict]] = defaultdict(list)
+        cell_counts: dict[tuple, int] = defaultdict(int)
+        file_iter = pool_files
+        if use_tqdm:
+            file_iter = tqdm(pool_files, desc="Streaming pool", unit=" file")
+        for pf in file_iter:
+            with open(pf, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    rec = json.loads(line)
+                    if rec.get("pool_id") in selected_ids:
+                        continue
+                    cell = _cell_key(rec)
+                    cell_counts[cell] += 1
+                    _reservoir_add(cell_pools[cell], rec, cell_counts[cell], max_per_cell, rng)
+        return dict(cell_pools)
+
+    # Parallel: split files across workers, merge with capped reservoirs
+    workers = min(max_workers, len(pool_files))
+    chunk_size = (len(pool_files) + workers - 1) // workers
+    tasks = []
+    for worker_id in range(workers):
+        batch = pool_files[worker_id * chunk_size:(worker_id + 1) * chunk_size]
+        if not batch:
+            continue
+        tasks.append((
+            [str(p) for p in batch],
+            selected_list,
+            max_per_cell,
+            (seed or 0) + worker_id,
+        ))
+
+    merged: dict[tuple, list[dict]] = {}
+    with ProcessPoolExecutor(max_workers=len(tasks)) as executor:
+        if use_tqdm:
+            partials = list(tqdm(
+                executor.map(_stream_pool_files_worker, tasks),
+                total=len(tasks),
+                desc="Streaming pool",
+                unit=" worker",
+            ))
+        else:
+            partials = list(executor.map(_stream_pool_files_worker, tasks))
+
+    for partial in partials:
+        _merge_cell_pools(merged, partial, max_per_cell, rng)
+
+    total_candidates = sum(len(v) for v in merged.values())
+    print(f"  Reservoir pools ready: {len(merged)} cells, {total_candidates:,} candidates in RAM")
+    return merged
+
+
 def _remove_from_cell_pool(cell_pools: dict[tuple, list[dict]], cell: tuple, chosen: dict) -> None:
     """Remove a chosen record from a cell pool by pool_id."""
     pool = cell_pools.get(cell, [])
@@ -251,10 +406,11 @@ def _select_parallel_rounds(
 
 
 def select_balanced_batch(
-    pool_records: list[dict],
+    pool_records: list[dict] | None = None,
     target_size: int = 5000,
     corpus_state: dict | None = None,
     *,
+    cell_pools: dict[tuple, list[dict]] | None = None,
     metadata_tolerance: float = 0.05,
     seed: int | None = 42,
     show_progress: bool = True,
@@ -264,9 +420,10 @@ def select_balanced_batch(
 
     Parameters
     ----------
-    pool_records : list of annotated candidate records
+    pool_records : full in-memory pool (optional if cell_pools provided)
     target_size : desired batch size
     corpus_state : existing corpus_state.json (cumulative state)
+    cell_pools : pre-built metadata cell pools (from build_cell_pools_streaming)
     metadata_tolerance : ±fraction tolerance for metadata balance
     seed : random seed for reproducibility
     max_workers : parallel processes for round-robin scoring (defaults to CPU count)
@@ -288,16 +445,21 @@ def select_balanced_batch(
     )
     cumulative_meta_counts = corpus_state.get("cumulative_meta_counts", {})
 
-    # Filter out already-selected records
-    candidates = [r for r in pool_records if r.get("pool_id") not in selected_ids]
-    if not candidates:
-        print("⚠ No candidates available (all already selected)")
-        return [], corpus_state
-
     # ---- Step 1: Group candidates by metadata cell ----
-    cell_pools: dict[tuple, list[dict]] = defaultdict(list)
-    for rec in candidates:
-        cell_pools[_cell_key(rec)].append(rec)
+    if cell_pools is None:
+        if pool_records is None:
+            raise ValueError("Provide pool_records or cell_pools")
+        candidates = [r for r in pool_records if r.get("pool_id") not in selected_ids]
+        if not candidates:
+            print("⚠ No candidates available (all already selected)")
+            return [], corpus_state
+        cell_pools = defaultdict(list)
+        for rec in candidates:
+            cell_pools[_cell_key(rec)].append(rec)
+    else:
+        if not any(cell_pools.values()):
+            print("⚠ No candidates available (all already selected)")
+            return [], corpus_state
 
     # ---- Step 2: Compute per-cell targets ----
     # All possible cells
@@ -411,27 +573,33 @@ if __name__ == "__main__":
     parser.add_argument("--state-file", type=str, default=None)
     parser.add_argument("--output", type=str, required=True,
                         help="Output batch JSONL path")
+    parser.add_argument("--max-candidates-per-cell", type=int, default=2_000,
+                        help="Bounded reservoir candidates retained per metadata cell")
+    parser.add_argument("--workers", type=int, default=None,
+                        help="Streaming/selection worker processes (default: CPU count)")
 
     args = parser.parse_args()
 
-    # Load pool
+    # Build bounded pools instead of materializing every pool record in RAM.
     pool_dir = Path(args.pool_dir or (_PROJECT_ROOT / "dataset" / "asr_corpus" / "pool"))
-    pool_records = []
-    for pf in sorted(pool_dir.glob("pool_chunk_*.jsonl")):
-        with open(pf, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    pool_records.append(json.loads(line))
-
-    # Load state
     corpus_state = None
     if args.state_file and Path(args.state_file).exists():
         with open(args.state_file, "r", encoding="utf-8") as f:
             corpus_state = json.load(f)
 
+    selected_ids = frozenset((corpus_state or {}).get("selected_ids", []))
+    cell_pools = build_cell_pools_streaming(
+        pool_dir,
+        selected_ids,
+        max_per_cell=args.max_candidates_per_cell,
+        max_workers=args.workers,
+    )
+
     selected, state = select_balanced_batch(
-        pool_records, args.target_size, corpus_state
+        target_size=args.target_size,
+        corpus_state=corpus_state,
+        cell_pools=cell_pools,
+        max_workers=args.workers,
     )
 
     # Save batch
