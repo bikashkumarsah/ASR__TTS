@@ -72,8 +72,12 @@ selection. It streams each `pool_chunk_*.jsonl` file and keeps only a bounded,
 reservoir-sampled set of candidates per metadata cell. This remains bounded
 even when the pool has thousands of chunks.
 
-The default is 2,000 candidates per cell. Lower it when memory is tight;
-increase it only when you want a wider candidate choice for syllable balancing.
+The default is 2,000 candidates per cell. This is a global per-cell cap, not a
+cap per worker: when several workers are used, the pipeline divides the cap
+between them and interleaves pool chunks across workers. This prevents the RAM
+limit from multiplying with the number of cloud CPU cores. Lower the cap when
+memory is tight; increase it only when you want a wider candidate choice for
+syllable balancing.
 By default, `--workers` uses every CPU core visible to Python. On Cloud Linux,
 the `CLOUD_WORKERS="$(nproc)"` setting above makes that allocation explicit.
 
@@ -85,10 +89,25 @@ python -m dataset_builder.pipeline run-batch \
 `--workers 1` uses the smallest RAM footprint. The recommended cloud setting
 is `--workers "$(nproc)"`, which uses all allocated cores for extraction,
 annotation, streaming, selection, and hash-partitioned deduplication. Each
-worker keeps only a bounded candidate reservoir rather than the complete pool.
+worker keeps only its share of a bounded global candidate reservoir rather than
+the complete pool.
 `--max-chunks 0` is the safe default: all chunks must be annotated before
 selection, and the pipeline stops with a clear error if a partial annotation is
 requested.
+
+### Resume after a streaming-worker failure
+
+Do not reset or rerun a completed batch. Pull the latest code, then rerun only
+the failed batch; `corpus_state.json` excludes the 5,000 records already
+selected in batch 1.
+
+```bash
+git pull origin main
+cd tokenizer/syllable-tokenizer/scripts
+CLOUD_WORKERS="$(nproc)"
+python -m dataset_builder.pipeline run-batch \
+  --batch-id 2 --target-size 5000 --workers "$CLOUD_WORKERS"
+```
 
 For a quick smoke test before a full build, limit the extraction input rather
 than limiting annotation:

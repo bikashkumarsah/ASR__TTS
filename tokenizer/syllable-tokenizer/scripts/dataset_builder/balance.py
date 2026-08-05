@@ -102,13 +102,10 @@ def _merge_cell_pools(
     max_per_cell: int,
     rng: random.Random,
 ) -> None:
-    """Merge worker cell pools and cap each cell with reservoir subsampling."""
+    """Merge bounded worker samples without exceeding the global cell cap."""
     for cell, recs in source.items():
-        if cell not in target:
-            target[cell] = []
-        pool = target[cell]
-        for rec in recs:
-            _reservoir_add(pool, rec, len(pool) + 1, max_per_cell, rng)
+        pool = target.setdefault(cell, [])
+        pool.extend(recs)
         if len(pool) > max_per_cell:
             target[cell] = rng.sample(pool, max_per_cell)
 
@@ -198,35 +195,45 @@ def build_cell_pools_streaming(
                     _reservoir_add(cell_pools[cell], rec, cell_counts[cell], max_per_cell, rng)
         return dict(cell_pools)
 
-    # Parallel: split files across workers, merge with capped reservoirs
+    # Parallel: split the *global* per-cell cap across workers.  Giving every
+    # worker the full cap can multiply memory by the worker count (for example,
+    # 32 workers x 2,000 candidates x 324 cells) and trigger an OOM kill.
+    # Interleaving chunk files gives each worker a representative cross-section
+    # of the corpus while keeping the combined candidate set near the requested
+    # global cap.
     workers = min(max_workers, len(pool_files))
-    chunk_size = (len(pool_files) + workers - 1) // workers
+    per_worker_cap = (
+        0 if max_per_cell <= 0
+        else (max_per_cell + workers - 1) // workers
+    )
+    print(
+        f"  Parallel reservoir: global max {max_per_cell}/cell, "
+        f"up to {per_worker_cap}/cell per worker"
+    )
     tasks = []
     for worker_id in range(workers):
-        batch = pool_files[worker_id * chunk_size:(worker_id + 1) * chunk_size]
+        batch = pool_files[worker_id::workers]
         if not batch:
             continue
         tasks.append((
             [str(p) for p in batch],
             selected_list,
-            max_per_cell,
+            per_worker_cap,
             (seed or 0) + worker_id,
         ))
 
     merged: dict[tuple, list[dict]] = {}
     with ProcessPoolExecutor(max_workers=len(tasks)) as executor:
+        partials = executor.map(_stream_pool_files_worker, tasks)
         if use_tqdm:
-            partials = list(tqdm(
-                executor.map(_stream_pool_files_worker, tasks),
+            partials = tqdm(
+                partials,
                 total=len(tasks),
                 desc="Streaming pool",
                 unit=" worker",
-            ))
-        else:
-            partials = list(executor.map(_stream_pool_files_worker, tasks))
-
-    for partial in partials:
-        _merge_cell_pools(merged, partial, max_per_cell, rng)
+            )
+        for partial in partials:
+            _merge_cell_pools(merged, partial, max_per_cell, rng)
 
     total_candidates = sum(len(v) for v in merged.values())
     print(f"  Reservoir pools ready: {len(merged)} cells, {total_candidates:,} candidates in RAM")

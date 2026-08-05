@@ -1,0 +1,134 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue,pdftitle={Technical Progress Report}}
+\newcommand{\project}{Nepali ASR/TTS: Syllable Tokenizer and Balanced Corpus Builder}
+\newcommand{\status}[1]{\textcolor{blue}{\textbf{#1}}}
+\begin{document}
+\begin{center}
+{\LARGE\bfseries Technical Progress Report\par}
+\vspace{0.35em}
+{\large \project\par}
+\vspace{0.5em}
+\textbf{Report date:} August 5, 2026 \qquad
+\textbf{Overall status:} \status{Operational and validated on representative fixtures}
+\end{center}
+\section{Purpose}
+This report records the technical progress of the Nepali ASR corpus-building workflow.
+It is designed for end-of-day updates so that decisions, validation evidence, risks, and next steps remain traceable.
+\section{Current System Snapshot}
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.28\textwidth}>{\raggedright\arraybackslash}p{0.64\textwidth}}
+\toprule
+\textbf{Area} & \textbf{Current state} \\
+\midrule
+Target corpus & 50,000 selected Nepali ASR sentences, produced in ten batches of 5,000. \\
+Primary inputs & Nepali-Text-Corpus Parquet shards, optional \texttt{compiled.txt}, and optional \texttt{Source\_book.txt}. \\
+Metadata & Tense, polarity, gender, and sector labels are assigned through configurable rule-based annotation. \\
+Selection & Metadata-stratified, syllable-aware greedy selection; prior selected IDs are excluded through \texttt{corpus\_state.json}. \\
+Final artifact & \texttt{asr\_corpus/corpus\_50k.jsonl} under the tokenizer dataset directory. \\
+Statistics & \texttt{asr\_corpus/reports/} and cumulative \texttt{asr\_corpus/corpus\_state.json}. \\
+\bottomrule
+\end{longtable}
+\section{Workflow Architecture}
+\begin{enumerate}[leftmargin=1.7em]
+\item \textbf{Extract:} Stream source files, split text into sentences, filter quality, deduplicate normalized text, and write chunked JSONL pool files.
+\item \textbf{Annotate:} Add tense, polarity, gender, and sector labels to every pool chunk.
+\item \textbf{Select:} Stream annotated chunks, retain a bounded candidate reservoir for each metadata cell, and select the next balanced batch.
+\item \textbf{Analyze:} Write a batch report with metadata distributions and syllable statistics.
+\item \textbf{Merge:} Deduplicate selected batch records and write the final corpus JSONL file.
+\end{enumerate}
+\section{Completed Work}
+\subsection{Corpus and Distribution Status}
+The existing output was checked for consistency. The ten batch files contain 50,000 records with 50,000 unique pool IDs.
+The merged corpus also contains 50,000 records. The cumulative state records 10 completed batches, 841 unique syllables, and a cumulative syllable coefficient of variation (CV) of 2.972.
+\begin{longtable}{lrr}
+\toprule
+\textbf{Metadata axis} & \textbf{Label} & \textbf{Count} \\
+\midrule
+\endhead
+Tense & Future & 8,437 \\
+& Mixed & 15,595 \\
+& Past & 13,007 \\
+& Present & 12,961 \\
+\addlinespace
+Polarity & Negative & 16,667 \\
+& Neutral & 18,863 \\
+& Positive & 14,470 \\
+\addlinespace
+Gender & Feminine & 15,324 \\
+& Masculine & 15,183 \\
+& Neutral & 19,493 \\
+\bottomrule
+\end{longtable}
+Sector-level counts and per-batch distribution details are in the report directory.
+Download it with \texttt{corpus\_50k.jsonl} and \texttt{corpus\_state.json} after a cloud run.
+\subsection{Memory-Safety Improvement}
+\textbf{Problem.} The original selection path read every \texttt{pool\_chunk\_*.jsonl} file into one Python list.
+On a large cloud run this attempted to materialize all 2,031 pool chunks and created an unnecessary RAM demand.
+\textbf{Implemented solution.} Selection now streams every pool chunk and uses reservoir sampling to retain only a bounded number of candidates per metadata cell.
+The default is 2,000 candidates per cell, configured with \texttt{--max-candidates-per-cell}; the complete pool is no longer held in memory during selection.
+In multi-worker mode this is a global per-cell cap: the allowance is divided between workers and chunk files are interleaved, preventing the cap from multiplying by the worker count.
+\subsection{Cloud CPU Scaling Improvement}
+The pipeline accepts \texttt{--workers} and defaults to all CPU cores visible to Python.
+The recommended cloud invocation is:
+\begin{verbatim}
+CLOUD_WORKERS="$(nproc)"
+python -m dataset_builder.pipeline run-batch \
+  --batch-id 1 --target-size 5000 --max-corpus 0 \
+  --max-chunks 0 --workers "$CLOUD_WORKERS"
+\end{verbatim}
+Parallel Parquet extraction, hash-partitioned deduplication, chunk writing, annotation, streaming, and selection use this worker allocation.
+The previous 32-worker cap in the extraction merge phase was removed. A one-worker path is available for low-memory or interactive-notebook execution.
+\subsection{Workflow Reliability Improvement}
+Partial annotation can bias metadata selection. The pipeline now checks pool chunks without materializing the pool and stops with a clear error if annotation is incomplete.
+Annotation processes sequentially when one worker is requested, avoiding a macOS/interpreter process-spawn issue in interactive sessions.
+\section{Validation Evidence}
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.30\textwidth}>{\raggedright\arraybackslash}p{0.58\textwidth}}
+\toprule
+\textbf{Check} & \textbf{Result} \\
+\midrule
+Python syntax compilation & Passed for all scripts under \texttt{scripts/}. \\
+2,031-chunk memory fixture & Passed with a cap of 25 candidates per metadata cell; selected 10 unique records without loading the entire pool. \\
+Multi-worker selection fixture & Passed with 4 workers over 2,031 chunks; the merged reservoir held 25 candidates and selected 10 unique records. \\
+Cloud Batch 1 production run & Completed with 32 workers: 51,431,998 candidates were extracted into 1,056 chunks, annotated, and used to select a balanced 5,000-record batch. \\
+Cloud Batch 2 incident & The streaming process pool was terminated during its initial implementation because the 2,000-per-cell limit was applied independently in every worker. The global-cap fix is validated locally; cloud retry is pending. \\
+End-to-end fixture & Extract, annotate, streaming selection, report generation, and state writing completed successfully. \\
+Parallel Parquet fixture & Passed with 3 accepted records and 3 unique output IDs. \\
+Existing corpus consistency & Passed: 10 batches, 50,000 selected records, 50,000 unique IDs, and 50,000 merged records. \\
+\bottomrule
+\end{longtable}
+\section{Known Constraints and Operating Guidance}
+\begin{itemize}[leftmargin=1.7em]
+\item The full source corpus is large. Download only the final corpus, cumulative state, and reports unless a resume is required.
+\item Full-core operation increases throughput, while each worker keeps a bounded reservoir. Reduce \texttt{--max-candidates-per-cell} or use \texttt{--workers 1} if RAM is constrained.
+\item Distribution reports describe the selected corpus; they do not replace qualitative ASR-data review or audio/text alignment validation.
+\item Record the first full production-scale cloud run with its duration, worker count, input size, output checksum, and any observed failures.
+\item If a batch fails after a prior batch completes, do not reset the corpus. Pull the current code and rerun only the failed batch; the state file preserves previous selections.
+\end{itemize}
+\section{Daily Work Log}
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.15\textwidth}>{\raggedright\arraybackslash}p{0.22\textwidth}>{\raggedright\arraybackslash}p{0.51\textwidth}}
+\toprule
+\textbf{Date} & \textbf{Status} & \textbf{Progress and evidence} \\
+\midrule
+\endhead
+2026-08-05 & In progress & Updated the README and pipeline instructions; replaced full-pool selection loading with bounded streaming reservoirs; enabled full cloud-core scaling; validated single-worker and multi-worker fixtures; confirmed the existing 50k corpus consistency; pushed commit \texttt{41637d2}. A 32-worker cloud run completed Batch 1 from 51,431,998 candidates (1,056 chunks) and selected 5,000 balanced records. Batch 2 exposed a per-worker reservoir memory multiplication; the global-cap fix was implemented and validated locally. Next: pull the fix on cloud and rerun Batch 2 only. \\
+\addlinespace
+\rule{0pt}{3.6em}\textit{YYYY-MM-DD} & \textit{Planned, active, or complete} & \textit{State the goal, files or commands changed, measured result, validation performed, blockers, and the next action.} \\
+\addlinespace
+\rule{0pt}{3.6em}\textit{YYYY-MM-DD} & \textit{Planned, active, or complete} & \textit{State the goal, files or commands changed, measured result, validation performed, blockers, and the next action.} \\
+\bottomrule
+\end{longtable}
+\section{End-of-Day Update Procedure}
+At the end of each workday, provide the day's commands, outputs, errors, decisions, and completed tasks. Then request:
+\begin{quote}
+\textit{Update \texttt{docs/technical\_progress\_report.tex} for today's work. Include completed work, measured results, validation, blockers, next steps, and any changes to the corpus or distribution statistics. Compile and verify the PDF afterwards.}
+\end{quote}
+The update should add a Daily Work Log row and revise the relevant technical sections whenever the design, validation evidence, risks, or results change.
+\end{document}
