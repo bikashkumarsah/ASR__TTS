@@ -13,7 +13,8 @@ def run_cmd(cmd):
         sys.exit(res.returncode)
 
 def main():
-    # Step 1: Run Batch 1 (pool already extracted in 416 chunks, this will perform annotation and Batch 1 selection)
+    # Step 1: Run Batch 1 (reuses the existing pool, annotates it if needed,
+    # and selects from a bounded streaming candidate reservoir).
     run_cmd([
         sys.executable, "-m", "dataset_builder.pipeline", "run-batch",
         "--batch-id", "1",

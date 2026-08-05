@@ -277,8 +277,9 @@ def annotate_pool(
     output_dir_str = str(output_dir)
     tasks = [(str(pf), rules_path_str, output_dir_str) for pf in pool_files]
 
-    workers = max_workers or min(os.cpu_count() or 4, len(pool_files))
-    print(f"▸ Annotating {len(pool_files)} pool chunks using {workers} parallel processes...")
+    requested_workers = max_workers or (os.cpu_count() or 4)
+    workers = max(1, min(requested_workers, len(tasks)))
+    print(f"▸ Annotating {len(pool_files)} pool chunks using {workers} worker process(es)...")
 
     stats = {
         "total": 0,
@@ -294,20 +295,26 @@ def annotate_pool(
     except ImportError:
         use_tqdm = False
 
-    with ProcessPoolExecutor(max_workers=workers) as executor:
-        futures = [executor.submit(_annotate_file_worker, t) for t in tasks]
-        iterable = as_completed(futures)
+    if workers == 1:
+        iterable = tasks
         if use_tqdm:
             iterable = tqdm(iterable, total=len(tasks), desc="Annotating pool chunks", unit=" file")
+        results = (_annotate_file_worker(task) for task in iterable)
+    else:
+        with ProcessPoolExecutor(max_workers=workers) as executor:
+            futures = [executor.submit(_annotate_file_worker, t) for t in tasks]
+            iterable = as_completed(futures)
+            if use_tqdm:
+                iterable = tqdm(iterable, total=len(tasks), desc="Annotating pool chunks", unit=" file")
+            results = [future.result() for future in iterable]
 
-        for fut in iterable:
-            fstats = fut.result()
-            stats["total"] += fstats["total"]
-            for k in ("tense", "polarity", "gender"):
-                for label, count in fstats[k].items():
-                    stats[k][label] = stats[k].get(label, 0) + count
-            for label, count in fstats["sector"].items():
-                stats["sector"][label] = stats["sector"].get(label, 0) + count
+    for fstats in results:
+        stats["total"] += fstats["total"]
+        for k in ("tense", "polarity", "gender"):
+            for label, count in fstats[k].items():
+                stats[k][label] = stats[k].get(label, 0) + count
+        for label, count in fstats["sector"].items():
+            stats["sector"][label] = stats["sector"].get(label, 0) + count
 
     # Summary
     stats_path = output_dir / "annotation_stats.json"
