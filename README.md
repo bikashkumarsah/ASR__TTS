@@ -98,41 +98,16 @@ requested.
 ### Use additional cloud RAM for coverage expansion
 
 More RAM does not make the selector read the entire pool. Instead, it permits a
-larger *bounded* reservoir, giving coverage-priority selection a broader choice
-of sentences in every metadata cell. The completed 100k run used about 10 GB
-with the default 2,000 candidates per cell. For a 120 GB instance, start at
-8,000 candidates per cell (four times the default) rather than allocating all
-available RAM: Python worker and merge peaks need substantial headroom. Keep
-all CPU cores enabled, monitor the first batch, and lower the cap if the
-instance approaches its memory limit.
+larger *bounded* per-cell reservoir, giving the balancer a broader choice of
+sentences. For a 120 GB instance, `--max-candidates-per-cell 8000` is a
+headroom-safe starting point. Keep all cores enabled and do not try to allocate
+all RAM: Python worker and merge peaks vary with the record size.
 
-```bash
-# Run from tokenizer/syllable-tokenizer/scripts after the 100k run.
-CLOUD_WORKERS="$(nproc)"
-
-# Preserve the completed 100k corpus before extending the active state.
-mkdir -p ../dataset/asr_corpus_baseline_100k
-cp ../dataset/asr_corpus/corpus_100k_coverage.jsonl ../dataset/asr_corpus_baseline_100k/
-cp ../dataset/asr_corpus/corpus_state.json ../dataset/asr_corpus_baseline_100k/
-cp -R ../dataset/asr_corpus/reports ../dataset/asr_corpus_baseline_100k/
-
-# Reuse the existing extracted and annotated pool. Do not reset or force-extract.
-for b in {21..30}; do
-  python -m dataset_builder.pipeline run-batch \
-    --batch-id "$b" --target-size 5000 \
-    --coverage-priority 16 --max-candidates-per-cell 8000 \
-    --workers "$CLOUD_WORKERS"
-done
-
-python -m dataset_builder.pipeline merge \
-  --output ../dataset/asr_corpus/corpus_150k_coverage.jsonl
-python -m dataset_builder.pipeline status
-```
-
-If the first batch stays below roughly 60 GB of RAM, `--max-candidates-per-cell
-12000` is a reasonable next step. Do not change the cap part way through the
-same 5k batch; changing it between completed batches is safe because only the
-selected IDs and cumulative frequencies are persisted.
+For the final coverage stage, the pipeline uses a second, much smaller bounded
+index: up to 256 examples for each requested source syllable. This is more
+effective than random reservoir expansion for rare syllables, because it
+guarantees that each source-supported target has candidates available to the
+coverage seed selector.
 
 ### Resume after a streaming-worker failure
 
@@ -157,37 +132,54 @@ python -m dataset_builder.pipeline run-batch \
   --batch-id 1 --target-size 100 --max-shards 1 --max-corpus 2000 --workers 1
 ```
 
-## Expand coverage from the existing pool
+## Source-aware coverage recovery and final 50k curation
 
-After a completed 50k build, reuse the annotated pool and state to add
-coverage-focused batches. Do not run `reset` or `--force-extract`: existing
-selected IDs are excluded automatically, and `--coverage-priority` adds a
-strong bonus for syllables not yet present in `corpus_state.json`.
+The lookup vocabulary contains 1,782 tokens, but the supplied source scan
+contains 1,182 distinct syllables. The final target is therefore the
+source-supported inventory, not all lookup entries: a syllable absent from the
+candidate pool cannot be recovered by selection.
+
+After the completed 150k run, the supplied state has 1,072 of the 1,182
+source-supported syllables (90.69%). The commands below recover the remaining
+source targets in a strict Batch 31, then create a **fresh**, standalone,
+balanced 50k corpus with all source-supported syllables. Neither command
+resets or re-extracts the pool. `build-final` does not change the incremental
+state or the existing batch files.
 
 ```bash
+# Run from tokenizer/syllable-tokenizer/scripts in the cloud repository.
 cd tokenizer/syllable-tokenizer/scripts
 CLOUD_WORKERS="$(nproc)"
 
-# Preserve the completed 50k corpus as a comparison baseline.
-mkdir -p ../dataset/asr_corpus_baseline_50k
-cp ../dataset/asr_corpus/corpus_50k.jsonl ../dataset/asr_corpus_baseline_50k/
-cp ../dataset/asr_corpus/corpus_state.json ../dataset/asr_corpus_baseline_50k/
-cp -R ../dataset/asr_corpus/reports ../dataset/asr_corpus_baseline_50k/
+# Establish the exact set that exists in the annotated source pool.
+python -m dataset_builder.pipeline coverage-inventory \
+  --output ../dataset/asr_corpus/source_syllable_inventory.json \
+  --workers "$CLOUD_WORKERS"
 
-for b in {11..20}; do
-  python -m dataset_builder.pipeline run-batch \
-    --batch-id "$b" --target-size 5000 \
-    --coverage-priority 8 --workers "$CLOUD_WORKERS"
-done
-
-python -m dataset_builder.pipeline merge \
-  --output ../dataset/asr_corpus/corpus_100k_coverage.jsonl
+# Recover every currently absent source syllable, or fail without writing a
+# partial batch. The remaining records are selected with metadata balancing.
+python -m dataset_builder.pipeline run-batch \
+  --batch-id 31 --target-size 5000 \
+  --coverage-targets ../dataset/asr_corpus/source_syllable_inventory.json \
+  --coverage-candidates-per-syllable 256 --require-full-coverage \
+  --max-candidates-per-cell 8000 --workers "$CLOUD_WORKERS"
 python -m dataset_builder.pipeline status
+
+# Curate a new 50k delivery dataset. This is non-destructive: it reads the
+# pool only, verifies 100% source-target coverage, and writes no batch/state.
+python -m dataset_builder.pipeline build-final \
+  --coverage-targets ../dataset/asr_corpus/source_syllable_inventory.json \
+  --target-size 50000 --max-candidates-per-cell 8000 \
+  --coverage-candidates-per-syllable 256 --workers "$CLOUD_WORKERS" \
+  --output ../dataset/asr_corpus/final_50k_all_syllables.jsonl \
+  --report-output ../dataset/asr_corpus/reports/final_50k_all_syllables_report.json
 ```
 
-This creates a 100k expanded corpus while preserving the first 50k records as
-the baseline. Compare the resulting `corpus_state.json` coverage and CV with
-the 50k baseline after each batch.
+Download `final_50k_all_syllables.jsonl` as the final dataset, with
+`final_50k_all_syllables_report.json` as its coverage and distribution proof.
+The final command fails instead of emitting a corpus if even one inventory
+syllable is missing or if an active metadata label deviates by more than two
+percentage points from uniform distribution.
 
 ## Outputs and resume behavior
 
@@ -197,7 +189,8 @@ All generated files are under `tokenizer/syllable-tokenizer/dataset/asr_corpus/`
 - `batches/batch_###.jsonl` — selected batches
 - `reports/batch_###_report.json` — distribution reports
 - `corpus_state.json` — selected IDs and cumulative balancing state
-- `corpus_50k.jsonl` — merged, de-duplicated output
+- `source_syllable_inventory.json` — source-supported coverage target set
+- `final_50k_all_syllables.jsonl` — standalone final delivery corpus
 
 To resume, rerun the next `run-batch` command. Existing selected IDs in
 `corpus_state.json` are excluded automatically. Use `reset` only when you
