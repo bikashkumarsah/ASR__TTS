@@ -180,6 +180,7 @@ def cmd_run_batch(args):
         corpus_state=state,
         cell_pools=cell_pools,
         seed=args.seed,
+        coverage_priority=args.coverage_priority,
         max_workers=getattr(args, "workers", None),
     )
 
@@ -354,7 +355,8 @@ Examples:
 
     # ---- run-batch ----
     p_batch = subparsers.add_parser("run-batch", help="Run extraction + selection for one batch")
-    p_batch.add_argument("--batch-id", type=int, required=True, help="Batch number (1-10)")
+    p_batch.add_argument("--batch-id", type=int, required=True,
+                         help="Batch number (use 11+ to extend an existing corpus)")
     p_batch.add_argument("--target-size", type=int, default=5000, help="Sentences per batch")
     p_batch.add_argument("--nepali-corpus", type=str, default=None,
                          help="Path to Nepali-Text-Corpus directory (parquet). "
@@ -375,6 +377,8 @@ Examples:
     p_batch.add_argument("--max-syllables", type=int, default=80)
     p_batch.add_argument("--rules", type=str, default=None, help="Path to rules.yaml")
     p_batch.add_argument("--seed", type=int, default=42, help="Random seed")
+    p_batch.add_argument("--coverage-priority", type=float, default=0.0,
+                         help="Extra score multiplier for syllables not yet in corpus state")
     p_batch.add_argument("--force-extract", action="store_true",
                          help="Force re-extraction even if pool exists")
     p_batch.add_argument("--workers", type=int, default=None,

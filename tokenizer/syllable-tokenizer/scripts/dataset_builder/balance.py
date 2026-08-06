@@ -45,25 +45,33 @@ def _syllable_deficit_score(
     record: dict,
     current_freq: Counter,
     target_per_syl: float,
+    coverage_priority: float = 0.0,
 ) -> float:
     """Score a sentence by how much it reduces syllable deficit.
 
     score(s) = Σ max(0, target - current_count[syl])
                for syl in unique_syllables(s)
+
+    When coverage_priority is positive, a syllable that has not appeared in
+    the cumulative corpus receives an additional multiple of target_per_syl.
+    This makes coverage-expansion batches prefer previously unseen syllables.
     """
     score = 0.0
     for syl in record.get("unique_syllables", []):
         if syl in _SKIP_TOKENS:
             continue
-        deficit = target_per_syl - current_freq.get(syl, 0)
+        current_count = current_freq.get(syl, 0)
+        deficit = target_per_syl - current_count
         if deficit > 0:
             score += deficit
+        if coverage_priority > 0 and current_count == 0:
+            score += coverage_priority * target_per_syl
     return score
 
 
 def _pick_best_from_cell_worker(args_tuple: tuple) -> tuple:
     """Score a sample of candidates for one metadata cell (ProcessPool worker)."""
-    cell, sample_records, freq_dict, target_per_syl = args_tuple
+    cell, sample_records, freq_dict, target_per_syl, coverage_priority = args_tuple
     if not sample_records:
         return cell, None
 
@@ -71,7 +79,9 @@ def _pick_best_from_cell_worker(args_tuple: tuple) -> tuple:
     best_rec = None
     best_score = -1.0
     for rec in sample_records:
-        score = _syllable_deficit_score(rec, freq, target_per_syl)
+        score = _syllable_deficit_score(
+            rec, freq, target_per_syl, coverage_priority
+        )
         if score > best_score:
             best_score = score
             best_rec = rec
@@ -275,6 +285,7 @@ def _select_sequential(
     cell_pools: dict[tuple, list[dict]],
     cumulative_syl_freq: Counter,
     target_per_syl: float,
+    coverage_priority: float,
     cell_selected_counts: dict[tuple, int],
     show_progress: bool,
 ) -> list[dict]:
@@ -308,7 +319,9 @@ def _select_sequential(
 
             for idx in sample_indices:
                 rec = pool[idx]
-                score = _syllable_deficit_score(rec, cumulative_syl_freq, target_per_syl)
+                score = _syllable_deficit_score(
+                    rec, cumulative_syl_freq, target_per_syl, coverage_priority
+                )
                 if score > best_score:
                     best_score = score
                     best_idx = idx
@@ -341,6 +354,7 @@ def _select_parallel_rounds(
     cell_pools: dict[tuple, list[dict]],
     cumulative_syl_freq: Counter,
     target_per_syl: float,
+    coverage_priority: float,
     cell_selected_counts: dict[tuple, int],
     max_workers: int,
     show_progress: bool,
@@ -379,7 +393,9 @@ def _select_parallel_rounds(
                 continue
             sample_size = min(len(pool), 200)
             sample = random.sample(pool, sample_size)
-            tasks.append((cell, sample, freq_snapshot, target_per_syl))
+            tasks.append((
+                cell, sample, freq_snapshot, target_per_syl, coverage_priority
+            ))
 
         if not tasks:
             break
@@ -420,6 +436,7 @@ def select_balanced_batch(
     cell_pools: dict[tuple, list[dict]] | None = None,
     metadata_tolerance: float = 0.05,
     seed: int | None = 42,
+    coverage_priority: float = 0.0,
     show_progress: bool = True,
     max_workers: int | None = None,
 ) -> tuple[list[dict], dict]:
@@ -433,6 +450,7 @@ def select_balanced_batch(
     cell_pools : pre-built metadata cell pools (from build_cell_pools_streaming)
     metadata_tolerance : ±fraction tolerance for metadata balance
     seed : random seed for reproducibility
+    coverage_priority : extra score multiplier for as-yet unseen syllables
     max_workers : parallel processes for round-robin scoring (defaults to CPU count)
 
     Returns
@@ -488,6 +506,13 @@ def select_balanced_batch(
     estimated_new_tokens = total_syl_tokens + target_size * 15  # ~15 tokens/sentence avg
     target_per_syl = estimated_new_tokens / max(unique_syl_types, 500)
 
+    if coverage_priority > 0:
+        print(
+            f"▸ Coverage priority enabled: +{coverage_priority:g}× target "
+            f"for each unseen syllable ({len(cumulative_syl_freq):,} types "
+            f"already covered in state)"
+        )
+
     # ---- Step 4: Round-robin greedy selection ----
     selected: list[dict] = []
     cell_selected_counts: dict[tuple, int] = defaultdict(int)
@@ -506,6 +531,7 @@ def select_balanced_batch(
             cell_pools=cell_pools,
             cumulative_syl_freq=cumulative_syl_freq,
             target_per_syl=target_per_syl,
+            coverage_priority=coverage_priority,
             cell_selected_counts=cell_selected_counts,
             max_workers=workers,
             show_progress=show_progress,
@@ -517,6 +543,7 @@ def select_balanced_batch(
             cell_pools=cell_pools,
             cumulative_syl_freq=cumulative_syl_freq,
             target_per_syl=target_per_syl,
+            coverage_priority=coverage_priority,
             cell_selected_counts=cell_selected_counts,
             show_progress=show_progress,
         )
@@ -584,6 +611,8 @@ if __name__ == "__main__":
                         help="Bounded reservoir candidates retained per metadata cell")
     parser.add_argument("--workers", type=int, default=None,
                         help="Streaming/selection worker processes (default: CPU count)")
+    parser.add_argument("--coverage-priority", type=float, default=0.0,
+                        help="Extra score multiplier for syllables not yet in state")
 
     args = parser.parse_args()
 
@@ -606,6 +635,7 @@ if __name__ == "__main__":
         target_size=args.target_size,
         corpus_state=corpus_state,
         cell_pools=cell_pools,
+        coverage_priority=args.coverage_priority,
         max_workers=args.workers,
     )
 
