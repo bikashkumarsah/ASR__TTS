@@ -18,7 +18,7 @@
 {\large \project\par}
 \vspace{0.5em}
 \textbf{Report date:} August 6, 2026 \qquad
-\textbf{Overall status:} \status{50k cloud run complete; coverage-improvement run planned}
+\textbf{Overall status:} \status{100k cloud run complete; RAM-scaled coverage expansion planned}
 \end{center}
 \section{Purpose}
 This report records the technical progress of the Nepali ASR corpus-building workflow.
@@ -28,13 +28,13 @@ It is designed for end-of-day updates so that decisions, validation evidence, ri
 \toprule
 \textbf{Area} & \textbf{Current state} \\
 \midrule
-Current corpus & 50,000 selected Nepali ASR sentences, produced in ten batches of 5,000. \\
+Current corpus & 100,000 selected Nepali ASR sentences, produced in twenty batches of 5,000. \\
 Primary inputs & Nepali-Text-Corpus Parquet shards, optional \texttt{compiled.txt}, and optional \texttt{Source\_book.txt}. \\
 Metadata & Tense, polarity, gender, and sector labels are assigned through configurable rule-based annotation. \\
 Selection & Metadata-stratified, syllable-aware greedy selection; prior selected IDs are excluded through \texttt{corpus\_state.json}. \\
-Final artifact & \texttt{asr\_corpus/corpus\_50k.jsonl} under the tokenizer dataset directory. \\
-Cloud aggregate metrics & 50,000 selections, 929 covered syllables of 1,782 lookup tokens (52.13\%), 3,155,451 total syllable tokens, and CV 3.0341. \\
-Statistics source & Supplied cloud \texttt{dataset/corpus\_state.json} and the ten per-batch cloud reports. \\
+Final artifact & \texttt{asr\_corpus/corpus\_100k\_coverage.jsonl} under the tokenizer dataset directory. \\
+Cloud aggregate metrics & 100,000 selections, 1,022 covered syllables of 1,782 lookup tokens (57.35\%), and CV 3.2209. \\
+Statistics source & Supplied cloud \texttt{corpus status} output after Batch 20. \\
 \bottomrule
 \end{longtable}
 \section{Workflow Architecture}
@@ -47,34 +47,43 @@ Statistics source & Supplied cloud \texttt{dataset/corpus\_state.json} and the t
 \end{enumerate}
 \section{Completed Work}
 \subsection{Corpus and Distribution Status}
-The supplied cloud state and report archive confirm that all ten batches completed. The final state records 50,000 selected sentences, 929 unique syllables, 3,155,451 syllable tokens, and a cumulative CV of 3.0341.
-Against the 1,782-token lookup vocabulary, the completed corpus covers 52.13\% of available syllables (929 tokens); 853 lookup tokens remain uncovered. The Batch 10 sample separately contains 744 unique syllables, or 41.75\% per-batch coverage.
+The supplied cloud status confirms that all twenty batches completed. The final state records 100,000 selected sentences, 1,022 unique syllables, and a cumulative CV of 3.2209.
+Against the 1,782-token lookup vocabulary, the completed corpus covers 57.35\% of available syllables (1,022 tokens); 760 lookup tokens remain uncovered. This is an improvement of 93 covered syllables over the preserved 50k baseline, while retaining a near-uniform metadata distribution.
 \begin{longtable}{lrr}
 \toprule
 \textbf{Metadata axis} & \textbf{Label} & \textbf{Count} \\
 \midrule
 \endhead
-Tense & Future & 8,437 \\
-& Mixed & 15,595 \\
-& Past & 13,007 \\
-& Present & 12,961 \\
+Tense & Future & 24,702 \\
+& Mixed & 25,054 \\
+& Past & 25,126 \\
+& Present & 25,118 \\
 \addlinespace
-Polarity & Negative & 16,667 \\
-& Neutral & 18,863 \\
-& Positive & 14,470 \\
+Polarity & Negative & 33,338 \\
+& Neutral & 33,408 \\
+& Positive & 33,254 \\
 \addlinespace
-Gender & Feminine & 15,324 \\
-& Masculine & 15,183 \\
-& Neutral & 19,493 \\
+Gender & Feminine & 33,356 \\
+& Masculine & 33,049 \\
+& Neutral & 33,595 \\
+\addlinespace
+Sector & Business & 11,192 \\
+& Conversational & 11,070 \\
+& Education & 11,087 \\
+& Entertainment & 11,156 \\
+& Formal & 11,194 \\
+& Health & 11,060 \\
+& News & 11,162 \\
+& Sports & 11,184 \\
+& Technology & 10,895 \\
 \bottomrule
 \end{longtable}
-Sector-level counts and per-batch distribution details are in the report directory.
-Download it with \texttt{corpus\_50k.jsonl} and \texttt{corpus\_state.json} after a cloud run.
+The largest observed metadata deviation is the technology sector at 10.9\%; all other sector labels lie between 11.1\% and 11.2\%. Download the merged corpus, \texttt{corpus\_state.json}, and report directory after a cloud run.
 \subsection{Memory-Safety Improvement}
 \textbf{Problem.} The original selection path read every \texttt{pool\_chunk\_*.jsonl} file into one Python list.
 On a large cloud run this attempted to materialize all 2,031 pool chunks and created an unnecessary RAM demand.
 \textbf{Implemented solution.} Selection now streams every pool chunk and uses reservoir sampling to retain only a bounded number of candidates per metadata cell.
-The default is 2,000 candidates per cell, configured with \texttt{--max-candidates-per-cell}; the complete pool is no longer held in memory during selection.
+The default is 2,000 candidates per cell, configured with \texttt{--max-candidates-per-cell}; the complete pool is no longer held in memory during selection. The observed 100k run used at most about 10 GB of a 120 GB cloud instance, leaving room to increase this bounded cap for wider coverage candidate choice.
 In multi-worker mode this is a global per-cell cap: the allowance is divided between workers and chunk files are interleaved, preventing the cap from multiplying by the worker count.
 \subsection{Cloud CPU Scaling Improvement}
 The pipeline accepts \texttt{--workers} and defaults to all CPU cores visible to Python.
@@ -98,34 +107,36 @@ Annotation processes sequentially when one worker is requested, avoiding a macOS
 Python syntax compilation & Passed for all scripts under \texttt{scripts/}. \\
 2,031-chunk memory fixture & Passed with a cap of 25 candidates per metadata cell; selected 10 unique records without loading the entire pool. \\
 Multi-worker selection fixture & Passed with 4 workers over 2,031 chunks; the merged reservoir held 25 candidates and selected 10 unique records. \\
-Cloud production run & Completed: 51,431,998 candidates were extracted into 1,056 chunks, annotated, and reused to select ten 5,000-record batches. \\
-Cloud recovery & Batch 2 completed after the global-cap fix. The final cloud state records 50,000 selections, 929 covered syllables, and a cumulative CV of 3.0341. \\
+Cloud production run & Completed: 51,431,998 candidates were extracted into 1,056 chunks, annotated, and reused to select twenty 5,000-record batches. \\
+Cloud coverage expansion & Batches 11--20 completed from the existing pool. The final cloud state records 100,000 selections, 1,022 covered syllables (57.35\%), and a cumulative CV of 3.2209. \\
 End-to-end fixture & Extract, annotate, streaming selection, report generation, and state writing completed successfully. \\
 Parallel Parquet fixture & Passed with 3 accepted records and 3 unique output IDs. \\
-Existing corpus consistency & Passed: 10 batches, 50,000 selected records, 50,000 unique IDs, and 50,000 merged records. \\
+Existing corpus consistency & Passed at 50k before expansion: 10 batches, 50,000 selected records, 50,000 unique IDs, and 50,000 merged records. \\
 \bottomrule
 \end{longtable}
 \section{Known Constraints and Operating Guidance}
 \begin{itemize}[leftmargin=1.7em]
 \item The full source corpus is large. Download only the final corpus, cumulative state, and reports unless a resume is required.
-\item Full-core operation increases throughput, while each worker keeps a bounded reservoir. Reduce \texttt{--max-candidates-per-cell} or use \texttt{--workers 1} if RAM is constrained.
+\item Full-core operation increases throughput, while each worker keeps a bounded reservoir. The cap is global rather than per worker; increase \texttt{--max-candidates-per-cell} to widen coverage choice, or reduce it/use \texttt{--workers 1} if RAM is constrained.
 \item Distribution reports describe the selected corpus; they do not replace qualitative ASR-data review or audio/text alignment validation.
 \item Retain the cloud pool. Re-extraction and re-annotation are unnecessary for the planned coverage-improvement run.
-\item Per-batch coverage is not aggregate coverage. The cloud state now establishes a 52.13\% aggregate baseline; use it for the next-run comparison.
+\item Per-batch coverage is not aggregate coverage. The 100k cloud state establishes a 57.35\% aggregate coverage baseline; use it for the next-run comparison.
+\item The observed 10 GB peak at a 2,000-candidate cap does not justify allocating all 120 GB. Python worker and merge peaks vary with record size; begin the next run at 8,000 candidates per cell and retain at least half the instance memory as headroom.
 \item If a batch fails after a prior batch completes, do not reset the corpus. Pull the current code and rerun only the failed batch; the state file preserves previous selections.
 \end{itemize}
-\section{Next Run: Coverage Improvement Using the Existing Cloud Pool}
-The next run should reuse the existing annotated cloud pool rather than rebuilding it. The objective is to select sentences containing uncovered and low-frequency lookup syllables while maintaining practical metadata balance.
+\section{Next Run: RAM-Scaled Coverage Improvement Using the Existing Cloud Pool}
+The next run should reuse the existing annotated cloud pool rather than rebuilding it. The objective is to use a wider bounded reservoir to select sentences containing the 760 uncovered and low-frequency lookup syllables while maintaining practical metadata balance.
 \begin{enumerate}[leftmargin=1.7em]
-\item \textbf{Preserve the current result.} Copy the current 50k corpus, state, and reports to a baseline directory before extending the active state with new batches.
+\item \textbf{Preserve the current result.} Copy the current 100k corpus, state, and reports to a baseline directory before extending the active state with new batches.
 \item \textbf{Reuse the cloud pool.} Use the already extracted and annotated \texttt{asr\_corpus/pool/} chunks. Do not run \texttt{reset} and do not use \texttt{--force-extract}.
-\item \textbf{Build the coverage inventory.} Use the cloud \texttt{corpus\_state.json} syllable-frequency table to identify the 853 uncovered lookup syllables and the least frequent covered syllables. This is the baseline for the next run.
-\item \textbf{Prioritize coverage.} Target the 853 uncovered syllables first, then the least frequent covered syllables. Candidate scoring should give a large bonus for each uncovered syllable and a smaller bonus for low-frequency syllables.
+\item \textbf{Build the coverage inventory.} Use the cloud \texttt{corpus\_state.json} syllable-frequency table to identify the 760 uncovered lookup syllables and the least frequent covered syllables. This is the baseline for the next run.
+\item \textbf{Increase bounded candidate choice.} Run the first new batch with \texttt{--max-candidates-per-cell 8000}, four times the default 2,000-cap reservoir. Keep \texttt{--workers "\$(nproc)"}. If the observed peak remains below approximately 60 GB, raise the cap to 12,000 for subsequent completed batches; otherwise retain 8,000 or lower it.
+\item \textbf{Prioritize coverage.} Target the 760 uncovered syllables first, then the least frequent covered syllables. Use \texttt{--coverage-priority 16}, which gives a stronger bonus for each as-yet unseen syllable while retaining the existing metadata stratification.
 \item \textbf{Keep metadata guardrails.} Retain the tense, polarity, gender, and sector stratification as a constraint, but relax it only for cells that lack candidates containing the target syllables.
-\item \textbf{Run coverage batches.} Run batches 11--20 with \texttt{--coverage-priority 8}. The implemented mode gives each currently unseen syllable an extra eight target-score units while retaining the existing metadata stratification.
-\item \textbf{Measure improvement.} Record coverage, number of newly covered syllables, CV, metadata distributions, and the overlap with the baseline after every batch. A proposed acceptance target is at least 60\% lookup coverage (1,070 of 1,782 syllables) without a material loss of metadata balance.
+\item \textbf{Run coverage batches.} Run batches 21--30 with the chosen candidate cap, then merge to \texttt{corpus\_150k\_coverage.jsonl}. Do not change the cap during an in-progress batch; changing it between completed batches is safe.
+\item \textbf{Measure improvement.} Record coverage, number of newly covered syllables, CV, metadata distributions, RAM peak, and the overlap with the 100k baseline after every batch. A proposed acceptance target is at least 65\% lookup coverage (1,159 of 1,782 syllables) without a material loss of metadata balance.
 \end{enumerate}
-The coverage-priority mode is implemented. The expanded result should be merged to a new \texttt{corpus\_100k\_coverage.jsonl} file, while the backed-up 50k corpus remains the control dataset.
+The coverage-priority mode and configurable bounded reservoir are implemented. The expanded result should be merged to a new \texttt{corpus\_150k\_coverage.jsonl} file, while the backed-up 100k corpus remains the control dataset.
 \section{Daily Work Log}
 \begin{longtable}{>{\raggedright\arraybackslash}p{0.15\textwidth}>{\raggedright\arraybackslash}p{0.22\textwidth}>{\raggedright\arraybackslash}p{0.51\textwidth}}
 \toprule
@@ -134,7 +145,7 @@ The coverage-priority mode is implemented. The expanded result should be merged 
 \endhead
 2026-08-05 & Completed & Updated the README and pipeline instructions; replaced full-pool selection loading with bounded streaming reservoirs; enabled full cloud-core scaling; validated single-worker and multi-worker fixtures; confirmed the existing 50k corpus consistency; pushed commit \texttt{41637d2}. A 32-worker cloud run completed Batch 1 from 51,431,998 candidates (1,056 chunks) and selected 5,000 balanced records. Batch 2 exposed a per-worker reservoir memory multiplication; the global-cap fix was implemented and validated locally. \\
 \addlinespace
-2026-08-06 & Completed & Cloud report artifacts and the final cloud state were added to the project dataset. The recovered run completed all 10 batches and produced 50,000 selected records, 929 covered lookup syllables (52.13\%), 3,155,451 syllable tokens, and CV 3.0341. Coverage-priority selection was added for batches 11--20, reusing the existing cloud pool without re-extraction. \\
+2026-08-06 & Completed & The cloud coverage expansion completed batches 11--20 using the existing extracted and annotated pool. The corpus now contains 100,000 selected records, 1,022 covered lookup syllables (57.35\%), and CV 3.2209. Tense, polarity, gender, and sector distributions remain close to uniform; the technology sector is the lowest at 10.9\%. The next planned stage is batches 21--30 with a bounded 8,000-candidate reservoir and full CPU allocation, monitored before any increase to 12,000 candidates per cell. \\
 \addlinespace
 \rule{0pt}{3.6em}\textit{YYYY-MM-DD} & \textit{Planned, active, or complete} & \textit{State the goal, files or commands changed, measured result, validation performed, blockers, and the next action.} \\
 \addlinespace

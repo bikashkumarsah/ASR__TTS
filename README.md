@@ -95,6 +95,45 @@ the complete pool.
 selection, and the pipeline stops with a clear error if a partial annotation is
 requested.
 
+### Use additional cloud RAM for coverage expansion
+
+More RAM does not make the selector read the entire pool. Instead, it permits a
+larger *bounded* reservoir, giving coverage-priority selection a broader choice
+of sentences in every metadata cell. The completed 100k run used about 10 GB
+with the default 2,000 candidates per cell. For a 120 GB instance, start at
+8,000 candidates per cell (four times the default) rather than allocating all
+available RAM: Python worker and merge peaks need substantial headroom. Keep
+all CPU cores enabled, monitor the first batch, and lower the cap if the
+instance approaches its memory limit.
+
+```bash
+# Run from tokenizer/syllable-tokenizer/scripts after the 100k run.
+CLOUD_WORKERS="$(nproc)"
+
+# Preserve the completed 100k corpus before extending the active state.
+mkdir -p ../dataset/asr_corpus_baseline_100k
+cp ../dataset/asr_corpus/corpus_100k_coverage.jsonl ../dataset/asr_corpus_baseline_100k/
+cp ../dataset/asr_corpus/corpus_state.json ../dataset/asr_corpus_baseline_100k/
+cp -R ../dataset/asr_corpus/reports ../dataset/asr_corpus_baseline_100k/
+
+# Reuse the existing extracted and annotated pool. Do not reset or force-extract.
+for b in {21..30}; do
+  python -m dataset_builder.pipeline run-batch \
+    --batch-id "$b" --target-size 5000 \
+    --coverage-priority 16 --max-candidates-per-cell 8000 \
+    --workers "$CLOUD_WORKERS"
+done
+
+python -m dataset_builder.pipeline merge \
+  --output ../dataset/asr_corpus/corpus_150k_coverage.jsonl
+python -m dataset_builder.pipeline status
+```
+
+If the first batch stays below roughly 60 GB of RAM, `--max-candidates-per-cell
+12000` is a reasonable next step. Do not change the cap part way through the
+same 5k batch; changing it between completed batches is safe because only the
+selected IDs and cumulative frequencies are persisted.
+
 ### Resume after a streaming-worker failure
 
 Do not reset or rerun a completed batch. Pull the latest code, then rerun only
