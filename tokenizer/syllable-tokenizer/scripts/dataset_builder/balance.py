@@ -250,6 +250,143 @@ def build_cell_pools_streaming(
     return merged
 
 
+def _stream_syllable_files_worker(args_tuple: tuple) -> dict[str, list[dict]]:
+    """Build bounded per-syllable candidate pools for coverage recovery."""
+    file_paths, selected_ids, target_syllables, max_per_syllable, seed = args_tuple
+    rng = random.Random(seed)
+    selected_set = frozenset(selected_ids)
+    targets = frozenset(target_syllables)
+    syllable_pools: dict[str, list[dict]] = defaultdict(list)
+    syllable_counts: dict[str, int] = defaultdict(int)
+
+    for pf in file_paths:
+        with open(pf, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                rec = json.loads(line)
+                if rec.get("pool_id") in selected_set:
+                    continue
+                record_syllables = set(rec.get("unique_syllables", []))
+                for syllable in record_syllables.intersection(targets):
+                    syllable_counts[syllable] += 1
+                    _reservoir_add(
+                        syllable_pools[syllable],
+                        rec,
+                        syllable_counts[syllable],
+                        max_per_syllable,
+                        rng,
+                    )
+
+    return dict(syllable_pools)
+
+
+def _merge_syllable_pools(
+    target: dict[str, list[dict]],
+    source: dict[str, list[dict]],
+    max_per_syllable: int,
+    rng: random.Random,
+) -> None:
+    """Merge bounded coverage samples while retaining the global cap."""
+    for syllable, recs in source.items():
+        pool = target.setdefault(syllable, [])
+        pool.extend(recs)
+        if len(pool) > max_per_syllable:
+            target[syllable] = rng.sample(pool, max_per_syllable)
+
+
+def build_syllable_candidate_pools_streaming(
+    pool_dir: str | Path,
+    selected_ids: set[str] | frozenset[str],
+    target_syllables: set[str] | frozenset[str],
+    *,
+    max_per_syllable: int = 256,
+    seed: int | None = 42,
+    max_workers: int | None = None,
+    show_progress: bool = True,
+) -> dict[str, list[dict]]:
+    """Index bounded candidate samples for each requested syllable.
+
+    This is a source-aware coverage index: it never materializes the full
+    candidate pool, but it guarantees that every requested syllable found in
+    the unselected pool has up to ``max_per_syllable`` selectable examples.
+    It is intended for rare-syllable recovery and final corpus curation.
+    """
+    import os
+    from concurrent.futures import ProcessPoolExecutor
+
+    targets = frozenset(s for s in target_syllables if s not in _SKIP_TOKENS)
+    if not targets:
+        return {}
+
+    pool_files = sorted(Path(pool_dir).glob("pool_chunk_*.jsonl"))
+    if not pool_files:
+        return {}
+
+    if max_workers is None:
+        max_workers = os.cpu_count() or 4
+    max_workers = max(1, max_workers)
+    print(
+        f"▸ Indexing {len(targets):,} coverage syllables across {len(pool_files)} pool chunks "
+        f"(max {max_per_syllable}/syllable)..."
+    )
+
+    try:
+        from tqdm import tqdm
+        use_tqdm = show_progress
+    except ImportError:
+        use_tqdm = False
+
+    rng = random.Random(seed)
+    selected_list = list(selected_ids)
+    target_list = list(targets)
+
+    if len(pool_files) <= 4 or max_workers <= 1:
+        return _stream_syllable_files_worker((
+            [str(p) for p in pool_files], selected_list, target_list,
+            max_per_syllable, seed or 0,
+        ))
+
+    workers = min(max_workers, len(pool_files))
+    per_worker_cap = max(1, (max_per_syllable + workers - 1) // workers)
+    print(
+        f"  Parallel coverage index: global max {max_per_syllable}/syllable, "
+        f"up to {per_worker_cap}/syllable per worker"
+    )
+    tasks = [
+        (
+            [str(p) for p in pool_files[worker_id::workers]],
+            selected_list,
+            target_list,
+            per_worker_cap,
+            (seed or 0) + worker_id,
+        )
+        for worker_id in range(workers)
+    ]
+
+    merged: dict[str, list[dict]] = {}
+    with ProcessPoolExecutor(max_workers=len(tasks)) as executor:
+        partials = executor.map(_stream_syllable_files_worker, tasks)
+        if use_tqdm:
+            partials = tqdm(
+                partials,
+                total=len(tasks),
+                desc="Indexing coverage",
+                unit=" worker",
+            )
+        for partial in partials:
+            _merge_syllable_pools(merged, partial, max_per_syllable, rng)
+
+    found = len(merged)
+    total_candidates = sum(len(pool) for pool in merged.values())
+    print(
+        f"  Coverage index ready: {found:,}/{len(targets):,} syllables found, "
+        f"{total_candidates:,} bounded candidate references"
+    )
+    return merged
+
+
 def _remove_from_cell_pool(cell_pools: dict[tuple, list[dict]], cell: tuple, chosen: dict) -> None:
     """Remove a chosen record from a cell pool by pool_id."""
     pool = cell_pools.get(cell, [])
@@ -258,6 +395,18 @@ def _remove_from_cell_pool(cell_pools: dict[tuple, list[dict]], cell: tuple, cho
         if rec.get("pool_id") == pid:
             pool.pop(i)
             return
+
+
+def _add_to_cell_pool_if_missing(
+    cell_pools: dict[tuple, list[dict]],
+    record: dict,
+) -> None:
+    """Make a coverage-index record available to the ordinary selector."""
+    cell = _cell_key(record)
+    pool = cell_pools.setdefault(cell, [])
+    pool_id = record.get("pool_id")
+    if not any(rec.get("pool_id") == pool_id for rec in pool):
+        pool.append(record)
 
 
 def _apply_selection(
@@ -276,6 +425,127 @@ def _apply_selection(
     for tok in chosen.get("syllables", []):
         if tok not in _SKIP_TOKENS:
             cumulative_syl_freq[tok] += 1
+
+
+def _coverage_metadata_score(
+    record: dict,
+    batch_meta_counts: dict[str, Counter],
+) -> float:
+    """Prefer an underrepresented metadata label when coverage ties."""
+    return -sum(
+        batch_meta_counts[axis][record.get(axis, "unknown")]
+        for axis in ("tense", "polarity", "gender", "sector")
+    )
+
+
+def select_coverage_seed_records(
+    *,
+    coverage_targets: set[str] | frozenset[str],
+    coverage_candidate_pools: dict[str, list[dict]],
+    cumulative_syl_freq: Counter,
+    cell_pools: dict[tuple, list[dict]],
+    cell_selected_counts: dict[tuple, int],
+    max_records: int,
+    require_full_coverage: bool,
+) -> tuple[list[dict], set[str]]:
+    """Greedily seed a batch with records covering currently absent targets.
+
+    Rare targets are handled first.  Within the bounded candidate samples, the
+    chooser uses maximum set coverage and then metadata underrepresentation as
+    a tie breaker.  The selected records are removed from the normal cell pools
+    so later balance selection cannot duplicate them.
+    """
+    uncovered = {
+        syllable for syllable in coverage_targets
+        if syllable not in _SKIP_TOKENS and cumulative_syl_freq.get(syllable, 0) == 0
+    }
+    if not uncovered:
+        return [], set()
+
+    unavailable = {
+        syllable for syllable in uncovered
+        if not coverage_candidate_pools.get(syllable)
+    }
+    if unavailable and require_full_coverage:
+        preview = ", ".join(sorted(unavailable)[:10])
+        raise RuntimeError(
+            f"Cannot satisfy required source coverage: {len(unavailable)} target "
+            f"syllable(s) have no unselected candidate ({preview})"
+        )
+    uncovered -= unavailable
+
+    selected: list[dict] = []
+    selected_pool_ids: set[str] = set()
+    batch_meta_counts: dict[str, Counter] = defaultdict(Counter)
+
+    while uncovered and len(selected) < max_records:
+        # Pick the least available target first, so a rare syllable cannot be
+        # displaced by earlier broad-coverage choices.
+        target = min(
+            uncovered,
+            key=lambda syllable: sum(
+                rec.get("pool_id") not in selected_pool_ids
+                for rec in coverage_candidate_pools.get(syllable, [])
+            ),
+        )
+        candidates = [
+            rec for rec in coverage_candidate_pools.get(target, [])
+            if rec.get("pool_id") not in selected_pool_ids
+        ]
+        if not candidates:
+            unavailable.add(target)
+            uncovered.remove(target)
+            continue
+
+        def score(record: dict) -> tuple[int, float]:
+            gained = len(set(record.get("unique_syllables", [])).intersection(uncovered))
+            return gained, _coverage_metadata_score(record, batch_meta_counts)
+
+        chosen = max(candidates, key=score)
+        _add_to_cell_pool_if_missing(cell_pools, chosen)
+        cell = _cell_key(chosen)
+        _apply_selection(
+            chosen,
+            cell,
+            selected=selected,
+            cell_pools=cell_pools,
+            cell_selected_counts=cell_selected_counts,
+            cumulative_syl_freq=cumulative_syl_freq,
+        )
+        selected_pool_ids.add(chosen.get("pool_id"))
+        for axis in ("tense", "polarity", "gender", "sector"):
+            batch_meta_counts[axis][chosen.get(axis, "unknown")] += 1
+        uncovered -= set(chosen.get("unique_syllables", []))
+
+    if uncovered:
+        unavailable.update(uncovered)
+    if unavailable:
+        print(
+            f"⚠ Coverage seed could not select {len(unavailable):,} target syllable(s) "
+            f"from the bounded index"
+        )
+    print(
+        f"▸ Coverage seed selected {len(selected):,} record(s); "
+        f"{len(unavailable):,} requested target(s) remain unavailable"
+    )
+    return selected, unavailable
+
+
+def _underfilled_cells(
+    cells_queue: list[tuple],
+    cell_pools: dict[tuple, list[dict]],
+    cell_selected_counts: dict[tuple, int],
+) -> list[tuple]:
+    """Return populated cells at the current minimum selection count.
+
+    This lets ordinary selection compensate for coverage seed records that had
+    to come from a small number of metadata cells.
+    """
+    populated = [cell for cell in cells_queue if cell_pools.get(cell)]
+    if not populated:
+        return []
+    min_count = min(cell_selected_counts[cell] for cell in populated)
+    return [cell for cell in populated if cell_selected_counts[cell] == min_count]
 
 
 def _select_sequential(
@@ -304,7 +574,7 @@ def _select_sequential(
         rounds += 1
         progress_made = False
 
-        for cell in cells_queue:
+        for cell in _underfilled_cells(cells_queue, cell_pools, cell_selected_counts):
             if len(selected) >= target_size:
                 break
 
@@ -387,7 +657,7 @@ def _select_parallel_rounds(
         rounds += 1
         tasks = []
 
-        for cell in cells_queue:
+        for cell in _underfilled_cells(cells_queue, cell_pools, cell_selected_counts):
             pool = cell_pools.get(cell, [])
             if not pool:
                 continue
@@ -437,6 +707,9 @@ def select_balanced_batch(
     metadata_tolerance: float = 0.05,
     seed: int | None = 42,
     coverage_priority: float = 0.0,
+    coverage_targets: set[str] | frozenset[str] | None = None,
+    coverage_candidate_pools: dict[str, list[dict]] | None = None,
+    require_full_coverage: bool = False,
     show_progress: bool = True,
     max_workers: int | None = None,
 ) -> tuple[list[dict], dict]:
@@ -451,6 +724,9 @@ def select_balanced_batch(
     metadata_tolerance : ±fraction tolerance for metadata balance
     seed : random seed for reproducibility
     coverage_priority : extra score multiplier for as-yet unseen syllables
+    coverage_targets : source-supported syllables that should be represented
+    coverage_candidate_pools : bounded per-syllable samples for target recovery
+    require_full_coverage : fail instead of emitting a corpus missing a target
     max_workers : parallel processes for round-robin scoring (defaults to CPU count)
 
     Returns
@@ -496,14 +772,22 @@ def select_balanced_batch(
         print("⚠ No active metadata cells with candidates")
         return [], corpus_state
 
-    ideal_per_cell = target_size / len(active_cells) if active_cells else 0
-    min_per_cell = max(1, int(ideal_per_cell * (1 - metadata_tolerance)))
-
     # ---- Step 3: Compute syllable target ----
     total_syl_tokens = sum(cumulative_syl_freq.values()) if cumulative_syl_freq else 1
-    unique_syl_types = max(len(cumulative_syl_freq), 1)
+    target_syllable_count = len(coverage_targets or ())
+    unique_syl_types = max(len(cumulative_syl_freq), target_syllable_count, 1)
     # After adding target_size sentences, target uniform distribution
-    estimated_new_tokens = total_syl_tokens + target_size * 15  # ~15 tokens/sentence avg
+    sampled_lengths = [
+        rec.get("syllable_count", 0)
+        for pool in cell_pools.values()
+        for rec in pool
+        if rec.get("syllable_count", 0) > 0
+    ]
+    estimated_tokens_per_sentence = (
+        sum(sampled_lengths) / len(sampled_lengths)
+        if sampled_lengths else 15
+    )
+    estimated_new_tokens = total_syl_tokens + target_size * estimated_tokens_per_sentence
     target_per_syl = estimated_new_tokens / max(unique_syl_types, 500)
 
     if coverage_priority > 0:
@@ -513,9 +797,33 @@ def select_balanced_batch(
             f"already covered in state)"
         )
 
-    # ---- Step 4: Round-robin greedy selection ----
+    # ---- Step 4: Seed requested source coverage, then balance the remainder ----
     selected: list[dict] = []
     cell_selected_counts: dict[tuple, int] = defaultdict(int)
+
+    if coverage_targets:
+        if coverage_candidate_pools is None:
+            raise ValueError(
+                "coverage_candidate_pools is required when coverage_targets is provided"
+            )
+        coverage_selected, unavailable_targets = select_coverage_seed_records(
+            coverage_targets=coverage_targets,
+            coverage_candidate_pools=coverage_candidate_pools,
+            cumulative_syl_freq=cumulative_syl_freq,
+            cell_pools=cell_pools,
+            cell_selected_counts=cell_selected_counts,
+            max_records=target_size,
+            require_full_coverage=require_full_coverage,
+        )
+        selected.extend(coverage_selected)
+        if unavailable_targets and require_full_coverage:
+            raise RuntimeError(
+                f"Required coverage selection missed {len(unavailable_targets)} target syllable(s)"
+            )
+
+    remaining_target_size = target_size - len(selected)
+    if remaining_target_size < 0:
+        raise RuntimeError("Coverage seed exceeds requested target size")
 
     cells_queue = list(active_cells)
     random.shuffle(cells_queue)
@@ -524,9 +832,9 @@ def select_balanced_batch(
     workers = max_workers if max_workers is not None else (os.cpu_count() or 4)
     use_parallel = workers > 1 and len(active_cells) > 1
 
-    if use_parallel:
-        selected = _select_parallel_rounds(
-            target_size=target_size,
+    if use_parallel and remaining_target_size:
+        selected.extend(_select_parallel_rounds(
+            target_size=remaining_target_size,
             cells_queue=cells_queue,
             cell_pools=cell_pools,
             cumulative_syl_freq=cumulative_syl_freq,
@@ -535,10 +843,10 @@ def select_balanced_batch(
             cell_selected_counts=cell_selected_counts,
             max_workers=workers,
             show_progress=show_progress,
-        )
-    else:
-        selected = _select_sequential(
-            target_size=target_size,
+        ))
+    elif remaining_target_size:
+        selected.extend(_select_sequential(
+            target_size=remaining_target_size,
             cells_queue=cells_queue,
             cell_pools=cell_pools,
             cumulative_syl_freq=cumulative_syl_freq,
@@ -546,7 +854,19 @@ def select_balanced_batch(
             coverage_priority=coverage_priority,
             cell_selected_counts=cell_selected_counts,
             show_progress=show_progress,
-        )
+        ))
+
+    if require_full_coverage and coverage_targets:
+        missing_after_selection = {
+            syllable for syllable in coverage_targets
+            if syllable not in _SKIP_TOKENS and cumulative_syl_freq.get(syllable, 0) == 0
+        }
+        if missing_after_selection:
+            preview = ", ".join(sorted(missing_after_selection)[:10])
+            raise RuntimeError(
+                f"Required coverage verification failed: {len(missing_after_selection)} "
+                f"target syllable(s) missing ({preview})"
+            )
 
     # ---- Step 5: Build updated corpus state ----
     new_selected_ids = [r["pool_id"] for r in selected]

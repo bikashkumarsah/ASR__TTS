@@ -25,8 +25,13 @@ sys.path.insert(0, str(_SCRIPT_DIR.parent))
 # Import pipeline modules
 from dataset_builder.extract import extract_pool
 from dataset_builder.annotate import annotate_pool
-from dataset_builder.balance import build_cell_pools_streaming, select_balanced_batch
+from dataset_builder.balance import (
+    build_cell_pools_streaming,
+    build_syllable_candidate_pools_streaming,
+    select_balanced_batch,
+)
 from dataset_builder.analyze import generate_batch_report
+from dataset_builder.coverage import build_source_syllable_inventory, load_coverage_targets
 
 
 # ---------------------------------------------------------------------------
@@ -167,6 +172,25 @@ def cmd_run_batch(args):
     print(f"\n▸ Stage 3: Selecting {target_size} balanced sentences...")
     state = _load_state()
     selected_ids = frozenset(state.get("selected_ids", []))
+    coverage_targets = None
+    coverage_candidate_pools = None
+    if args.coverage_targets:
+        coverage_targets = load_coverage_targets(args.coverage_targets)
+        uncovered_targets = coverage_targets.difference(
+            state.get("cumulative_syllable_freq", {})
+        )
+        print(
+            f"▸ Source coverage target: {len(coverage_targets):,} syllables; "
+            f"{len(uncovered_targets):,} currently absent"
+        )
+        coverage_candidate_pools = build_syllable_candidate_pools_streaming(
+            _POOL_DIR,
+            selected_ids,
+            uncovered_targets,
+            max_per_syllable=args.coverage_candidates_per_syllable,
+            seed=args.seed,
+            max_workers=getattr(args, "workers", None),
+        )
     cell_pools = build_cell_pools_streaming(
         _POOL_DIR,
         selected_ids,
@@ -181,6 +205,9 @@ def cmd_run_batch(args):
         cell_pools=cell_pools,
         seed=args.seed,
         coverage_priority=args.coverage_priority,
+        coverage_targets=coverage_targets,
+        coverage_candidate_pools=coverage_candidate_pools,
+        require_full_coverage=args.require_full_coverage,
         max_workers=getattr(args, "workers", None),
     )
 
@@ -238,6 +265,163 @@ def cmd_analyze(args):
 
     state = _load_state()
     generate_batch_report(records, batch_id, corpus_state=state, reports_dir=_REPORTS_DIR)
+
+
+def cmd_coverage_inventory(args):
+    """Write the syllables actually attainable from the existing pool."""
+    build_source_syllable_inventory(
+        _POOL_DIR,
+        args.output,
+        max_workers=getattr(args, "workers", None),
+    )
+
+
+def _metadata_balance_summary(
+    records: list[dict],
+    expected_labels: dict[str, list[str]],
+) -> dict:
+    """Measure marginal metadata balance against labels present in the pool."""
+    summary = {}
+    total = len(records)
+    for axis, labels in expected_labels.items():
+        counts = {label: 0 for label in labels}
+        for record in records:
+            label = record.get(axis, "unknown")
+            if label in counts:
+                counts[label] += 1
+        ideal_pct = 100 / len(labels) if labels else 0
+        deviations = {
+            label: round(abs((count / total * 100) - ideal_pct), 4) if total else 0.0
+            for label, count in counts.items()
+        }
+        summary[axis] = {
+            "counts": counts,
+            "ideal_pct": round(ideal_pct, 4),
+            "max_abs_deviation_pct_points": max(deviations.values(), default=0.0),
+            "abs_deviation_pct_points": deviations,
+        }
+    return summary
+
+
+def cmd_build_final(args):
+    """Create a fresh 50k corpus with required source-syllable coverage.
+
+    This command is intentionally non-destructive: it reads the annotated
+    cloud pool but does not change incremental batches or corpus_state.json.
+    """
+    target_size = args.target_size
+    target_syllables = load_coverage_targets(args.coverage_targets)
+    pool_files = sorted(_POOL_DIR.glob("pool_chunk_*.jsonl"))
+    if not pool_files:
+        raise FileNotFoundError(f"No candidate pool found at {_POOL_DIR}")
+    if _pool_needs_annotation(pool_files):
+        raise RuntimeError("Final curation requires a fully annotated pool")
+
+    print(f"\n{'='*60}")
+    print(f"  BUILDING FINAL {target_size:,}-RECORD COVERAGE CORPUS")
+    print(f"{'='*60}")
+    print(f"▸ Required source syllables: {len(target_syllables):,}")
+
+    cell_pools = build_cell_pools_streaming(
+        _POOL_DIR,
+        frozenset(),
+        max_per_cell=args.max_candidates_per_cell,
+        seed=args.seed,
+        max_workers=getattr(args, "workers", None),
+    )
+    expected_labels = {
+        "tense": sorted({cell[0] for cell, pool in cell_pools.items() if pool}),
+        "polarity": sorted({cell[1] for cell, pool in cell_pools.items() if pool}),
+        "gender": sorted({cell[2] for cell, pool in cell_pools.items() if pool}),
+        "sector": sorted({cell[3] for cell, pool in cell_pools.items() if pool}),
+    }
+    coverage_candidate_pools = build_syllable_candidate_pools_streaming(
+        _POOL_DIR,
+        frozenset(),
+        target_syllables,
+        max_per_syllable=args.coverage_candidates_per_syllable,
+        seed=args.seed,
+        max_workers=getattr(args, "workers", None),
+    )
+    selected, final_state = select_balanced_batch(
+        target_size=target_size,
+        corpus_state={},
+        cell_pools=cell_pools,
+        seed=args.seed,
+        coverage_priority=args.coverage_priority,
+        coverage_targets=target_syllables,
+        coverage_candidate_pools=coverage_candidate_pools,
+        require_full_coverage=True,
+        max_workers=getattr(args, "workers", None),
+    )
+    if len(selected) != target_size:
+        raise RuntimeError(
+            f"Final curation selected {len(selected):,}/{target_size:,} records; no output written"
+        )
+
+    covered = {
+        syllable
+        for record in selected
+        for syllable in record.get("unique_syllables", [])
+    }
+    missing = target_syllables.difference(covered)
+    if missing:
+        raise RuntimeError(
+            f"Final coverage verification failed: {len(missing)} syllable(s) missing"
+        )
+
+    metadata_balance = _metadata_balance_summary(selected, expected_labels)
+    tolerance_pct_points = args.max_metadata_deviation * 100
+    violations = [
+        f"{axis}={info['max_abs_deviation_pct_points']:.2f}pp"
+        for axis, info in metadata_balance.items()
+        if info["max_abs_deviation_pct_points"] > tolerance_pct_points
+    ]
+    if violations:
+        raise RuntimeError(
+            "Final metadata balance verification failed "
+            f"(limit {tolerance_pct_points:.2f} percentage points): "
+            + ", ".join(violations)
+        )
+
+    for index, record in enumerate(selected):
+        record["id"] = f"final_{index:08d}"
+        record["batch_id"] = "final_50k"
+
+    output_path = Path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as f:
+        for record in selected:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    report_path = Path(args.report_output)
+    report = generate_batch_report(
+        selected,
+        batch_id=0,
+        corpus_state=final_state,
+        reports_dir=report_path.parent,
+    )
+    report["source_coverage"] = {
+        "target_syllables": len(target_syllables),
+        "covered_syllables": len(target_syllables),
+        "missing_syllables": [],
+        "coverage_pct": 100.0,
+    }
+    report["final_curation"] = {
+        "target_size": target_size,
+        "coverage_required": True,
+        "max_candidates_per_cell": args.max_candidates_per_cell,
+        "coverage_candidates_per_syllable": args.coverage_candidates_per_syllable,
+        "max_metadata_deviation_pct_points": tolerance_pct_points,
+    }
+    report["final_metadata_balance"] = metadata_balance
+    with open(report_path, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+
+    print(f"✓ Final corpus written: {output_path}")
+    print(f"✓ Final coverage report: {report_path}")
+    print(f"  Source-syllable coverage: {len(target_syllables):,}/{len(target_syllables):,} (100.0%)")
+    print(f"  Metadata balance: passed within {tolerance_pct_points:.2f} percentage points")
 
 
 def cmd_merge(args):
@@ -356,7 +540,7 @@ Examples:
     # ---- run-batch ----
     p_batch = subparsers.add_parser("run-batch", help="Run extraction + selection for one batch")
     p_batch.add_argument("--batch-id", type=int, required=True,
-                         help="Batch number (use 11+ to extend an existing corpus)")
+                         help="New batch number (for example, 31+ after a 150k corpus)")
     p_batch.add_argument("--target-size", type=int, default=5000, help="Sentences per batch")
     p_batch.add_argument("--nepali-corpus", type=str, default=None,
                          help="Path to Nepali-Text-Corpus directory (parquet). "
@@ -379,6 +563,12 @@ Examples:
     p_batch.add_argument("--seed", type=int, default=42, help="Random seed")
     p_batch.add_argument("--coverage-priority", type=float, default=0.0,
                          help="Extra score multiplier for syllables not yet in corpus state")
+    p_batch.add_argument("--coverage-targets", type=str, default=None,
+                         help="Source inventory JSON or syllable list for guaranteed recovery")
+    p_batch.add_argument("--coverage-candidates-per-syllable", type=int, default=256,
+                         help="Bounded candidate examples retained per requested syllable")
+    p_batch.add_argument("--require-full-coverage", action="store_true",
+                         help="Fail the batch if any coverage target remains absent")
     p_batch.add_argument("--force-extract", action="store_true",
                          help="Force re-extraction even if pool exists")
     p_batch.add_argument("--workers", type=int, default=None,
@@ -389,6 +579,45 @@ Examples:
     p_analyze = subparsers.add_parser("analyze", help="Analyze an existing batch")
     p_analyze.add_argument("--batch-id", type=int, required=True)
     p_analyze.set_defaults(func=cmd_analyze)
+
+    # ---- coverage-inventory ----
+    p_inventory = subparsers.add_parser(
+        "coverage-inventory",
+        help="Scan the pool and write the source-supported syllable target set",
+    )
+    p_inventory.add_argument("--output", type=str, required=True,
+                             help="Output JSON inventory path")
+    p_inventory.add_argument("--workers", type=int, default=None,
+                             help="Parallel worker processes (default: CPU count)")
+    p_inventory.set_defaults(func=cmd_coverage_inventory)
+
+    # ---- build-final ----
+    p_final = subparsers.add_parser(
+        "build-final",
+        help="Non-destructively curate a fresh balanced final corpus with full source coverage",
+    )
+    p_final.add_argument("--coverage-targets", type=str, required=True,
+                         help="Source inventory JSON or syllable list to cover")
+    p_final.add_argument("--target-size", type=int, default=50_000,
+                         help="Final corpus size")
+    p_final.add_argument("--output", type=str,
+                         default=str(_CORPUS_DIR / "final_50k_all_syllables.jsonl"),
+                         help="Final corpus JSONL path")
+    p_final.add_argument("--report-output", type=str,
+                         default=str(_REPORTS_DIR / "final_50k_all_syllables_report.json"),
+                         help="Final coverage and distribution report JSON path")
+    p_final.add_argument("--max-candidates-per-cell", type=int, default=8_000,
+                         help="Bounded reservoir candidates retained per metadata cell")
+    p_final.add_argument("--coverage-candidates-per-syllable", type=int, default=256,
+                         help="Bounded candidate examples retained per target syllable")
+    p_final.add_argument("--coverage-priority", type=float, default=0.0,
+                         help="Additional priority for uncovered syllables after coverage seed")
+    p_final.add_argument("--max-metadata-deviation", type=float, default=0.02,
+                         help="Maximum allowed marginal metadata deviation from uniform (fraction; default: 0.02)")
+    p_final.add_argument("--seed", type=int, default=42, help="Random seed")
+    p_final.add_argument("--workers", type=int, default=None,
+                         help="Parallel worker processes (default: CPU count)")
+    p_final.set_defaults(func=cmd_build_final)
 
     # ---- merge ----
     p_merge = subparsers.add_parser("merge", help="Merge all batches into final corpus")
