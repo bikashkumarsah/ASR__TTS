@@ -118,6 +118,38 @@ python -m dataset_builder.pipeline run-batch \
   --batch-id 1 --target-size 100 --max-shards 1 --max-corpus 2000 --workers 1
 ```
 
+## Expand coverage from the existing pool
+
+After a completed 50k build, reuse the annotated pool and state to add
+coverage-focused batches. Do not run `reset` or `--force-extract`: existing
+selected IDs are excluded automatically, and `--coverage-priority` adds a
+strong bonus for syllables not yet present in `corpus_state.json`.
+
+```bash
+cd tokenizer/syllable-tokenizer/scripts
+CLOUD_WORKERS="$(nproc)"
+
+# Preserve the completed 50k corpus as a comparison baseline.
+mkdir -p ../dataset/asr_corpus_baseline_50k
+cp ../dataset/asr_corpus/corpus_50k.jsonl ../dataset/asr_corpus_baseline_50k/
+cp ../dataset/asr_corpus/corpus_state.json ../dataset/asr_corpus_baseline_50k/
+cp -R ../dataset/asr_corpus/reports ../dataset/asr_corpus_baseline_50k/
+
+for b in {11..20}; do
+  python -m dataset_builder.pipeline run-batch \
+    --batch-id "$b" --target-size 5000 \
+    --coverage-priority 8 --workers "$CLOUD_WORKERS"
+done
+
+python -m dataset_builder.pipeline merge \
+  --output ../dataset/asr_corpus/corpus_100k_coverage.jsonl
+python -m dataset_builder.pipeline status
+```
+
+This creates a 100k expanded corpus while preserving the first 50k records as
+the baseline. Compare the resulting `corpus_state.json` coverage and CV with
+the 50k baseline after each batch.
+
 ## Outputs and resume behavior
 
 All generated files are under `tokenizer/syllable-tokenizer/dataset/asr_corpus/`:

@@ -17,8 +17,8 @@
 \vspace{0.35em}
 {\large \project\par}
 \vspace{0.5em}
-\textbf{Report date:} August 5, 2026 \qquad
-\textbf{Overall status:} \status{Operational and validated on representative fixtures}
+\textbf{Report date:} August 6, 2026 \qquad
+\textbf{Overall status:} \status{50k cloud run complete; coverage-improvement run planned}
 \end{center}
 \section{Purpose}
 This report records the technical progress of the Nepali ASR corpus-building workflow.
@@ -28,12 +28,13 @@ It is designed for end-of-day updates so that decisions, validation evidence, ri
 \toprule
 \textbf{Area} & \textbf{Current state} \\
 \midrule
-Target corpus & 50,000 selected Nepali ASR sentences, produced in ten batches of 5,000. \\
+Current corpus & 50,000 selected Nepali ASR sentences, produced in ten batches of 5,000. \\
 Primary inputs & Nepali-Text-Corpus Parquet shards, optional \texttt{compiled.txt}, and optional \texttt{Source\_book.txt}. \\
 Metadata & Tense, polarity, gender, and sector labels are assigned through configurable rule-based annotation. \\
 Selection & Metadata-stratified, syllable-aware greedy selection; prior selected IDs are excluded through \texttt{corpus\_state.json}. \\
 Final artifact & \texttt{asr\_corpus/corpus\_50k.jsonl} under the tokenizer dataset directory. \\
-Statistics & \texttt{asr\_corpus/reports/} and cumulative \texttt{asr\_corpus/corpus\_state.json}. \\
+Cloud aggregate metrics & 50,000 selections, 929 covered syllables of 1,782 lookup tokens (52.13\%), 3,155,451 total syllable tokens, and CV 3.0341. \\
+Statistics source & Supplied cloud \texttt{dataset/corpus\_state.json} and the ten per-batch cloud reports. \\
 \bottomrule
 \end{longtable}
 \section{Workflow Architecture}
@@ -46,8 +47,8 @@ Statistics & \texttt{asr\_corpus/reports/} and cumulative \texttt{asr\_corpus/co
 \end{enumerate}
 \section{Completed Work}
 \subsection{Corpus and Distribution Status}
-The existing output was checked for consistency. The ten batch files contain 50,000 records with 50,000 unique pool IDs.
-The merged corpus also contains 50,000 records. The cumulative state records 10 completed batches, 841 unique syllables, and a cumulative syllable coefficient of variation (CV) of 2.972.
+The supplied cloud state and report archive confirm that all ten batches completed. The final state records 50,000 selected sentences, 929 unique syllables, 3,155,451 syllable tokens, and a cumulative CV of 3.0341.
+Against the 1,782-token lookup vocabulary, the completed corpus covers 52.13\% of available syllables (929 tokens); 853 lookup tokens remain uncovered. The Batch 10 sample separately contains 744 unique syllables, or 41.75\% per-batch coverage.
 \begin{longtable}{lrr}
 \toprule
 \textbf{Metadata axis} & \textbf{Label} & \textbf{Count} \\
@@ -97,8 +98,8 @@ Annotation processes sequentially when one worker is requested, avoiding a macOS
 Python syntax compilation & Passed for all scripts under \texttt{scripts/}. \\
 2,031-chunk memory fixture & Passed with a cap of 25 candidates per metadata cell; selected 10 unique records without loading the entire pool. \\
 Multi-worker selection fixture & Passed with 4 workers over 2,031 chunks; the merged reservoir held 25 candidates and selected 10 unique records. \\
-Cloud Batch 1 production run & Completed with 32 workers: 51,431,998 candidates were extracted into 1,056 chunks, annotated, and used to select a balanced 5,000-record batch. \\
-Cloud Batch 2 incident & The streaming process pool was terminated during its initial implementation because the 2,000-per-cell limit was applied independently in every worker. The global-cap fix is validated locally; cloud retry is pending. \\
+Cloud production run & Completed: 51,431,998 candidates were extracted into 1,056 chunks, annotated, and reused to select ten 5,000-record batches. \\
+Cloud recovery & Batch 2 completed after the global-cap fix. The final cloud state records 50,000 selections, 929 covered syllables, and a cumulative CV of 3.0341. \\
 End-to-end fixture & Extract, annotate, streaming selection, report generation, and state writing completed successfully. \\
 Parallel Parquet fixture & Passed with 3 accepted records and 3 unique output IDs. \\
 Existing corpus consistency & Passed: 10 batches, 50,000 selected records, 50,000 unique IDs, and 50,000 merged records. \\
@@ -109,16 +110,31 @@ Existing corpus consistency & Passed: 10 batches, 50,000 selected records, 50,00
 \item The full source corpus is large. Download only the final corpus, cumulative state, and reports unless a resume is required.
 \item Full-core operation increases throughput, while each worker keeps a bounded reservoir. Reduce \texttt{--max-candidates-per-cell} or use \texttt{--workers 1} if RAM is constrained.
 \item Distribution reports describe the selected corpus; they do not replace qualitative ASR-data review or audio/text alignment validation.
-\item Record the first full production-scale cloud run with its duration, worker count, input size, output checksum, and any observed failures.
+\item Retain the cloud pool. Re-extraction and re-annotation are unnecessary for the planned coverage-improvement run.
+\item Per-batch coverage is not aggregate coverage. The cloud state now establishes a 52.13\% aggregate baseline; use it for the next-run comparison.
 \item If a batch fails after a prior batch completes, do not reset the corpus. Pull the current code and rerun only the failed batch; the state file preserves previous selections.
 \end{itemize}
+\section{Next Run: Coverage Improvement Using the Existing Cloud Pool}
+The next run should reuse the existing annotated cloud pool rather than rebuilding it. The objective is to select sentences containing uncovered and low-frequency lookup syllables while maintaining practical metadata balance.
+\begin{enumerate}[leftmargin=1.7em]
+\item \textbf{Preserve the current result.} Copy the current 50k corpus, state, and reports to a baseline directory before extending the active state with new batches.
+\item \textbf{Reuse the cloud pool.} Use the already extracted and annotated \texttt{asr\_corpus/pool/} chunks. Do not run \texttt{reset} and do not use \texttt{--force-extract}.
+\item \textbf{Build the coverage inventory.} Use the cloud \texttt{corpus\_state.json} syllable-frequency table to identify the 853 uncovered lookup syllables and the least frequent covered syllables. This is the baseline for the next run.
+\item \textbf{Prioritize coverage.} Target the 853 uncovered syllables first, then the least frequent covered syllables. Candidate scoring should give a large bonus for each uncovered syllable and a smaller bonus for low-frequency syllables.
+\item \textbf{Keep metadata guardrails.} Retain the tense, polarity, gender, and sector stratification as a constraint, but relax it only for cells that lack candidates containing the target syllables.
+\item \textbf{Run coverage batches.} Run batches 11--20 with \texttt{--coverage-priority 8}. The implemented mode gives each currently unseen syllable an extra eight target-score units while retaining the existing metadata stratification.
+\item \textbf{Measure improvement.} Record coverage, number of newly covered syllables, CV, metadata distributions, and the overlap with the baseline after every batch. A proposed acceptance target is at least 60\% lookup coverage (1,070 of 1,782 syllables) without a material loss of metadata balance.
+\end{enumerate}
+The coverage-priority mode is implemented. The expanded result should be merged to a new \texttt{corpus\_100k\_coverage.jsonl} file, while the backed-up 50k corpus remains the control dataset.
 \section{Daily Work Log}
 \begin{longtable}{>{\raggedright\arraybackslash}p{0.15\textwidth}>{\raggedright\arraybackslash}p{0.22\textwidth}>{\raggedright\arraybackslash}p{0.51\textwidth}}
 \toprule
 \textbf{Date} & \textbf{Status} & \textbf{Progress and evidence} \\
 \midrule
 \endhead
-2026-08-05 & In progress & Updated the README and pipeline instructions; replaced full-pool selection loading with bounded streaming reservoirs; enabled full cloud-core scaling; validated single-worker and multi-worker fixtures; confirmed the existing 50k corpus consistency; pushed commit \texttt{41637d2}. A 32-worker cloud run completed Batch 1 from 51,431,998 candidates (1,056 chunks) and selected 5,000 balanced records. Batch 2 exposed a per-worker reservoir memory multiplication; the global-cap fix was implemented and validated locally. Next: pull the fix on cloud and rerun Batch 2 only. \\
+2026-08-05 & Completed & Updated the README and pipeline instructions; replaced full-pool selection loading with bounded streaming reservoirs; enabled full cloud-core scaling; validated single-worker and multi-worker fixtures; confirmed the existing 50k corpus consistency; pushed commit \texttt{41637d2}. A 32-worker cloud run completed Batch 1 from 51,431,998 candidates (1,056 chunks) and selected 5,000 balanced records. Batch 2 exposed a per-worker reservoir memory multiplication; the global-cap fix was implemented and validated locally. \\
+\addlinespace
+2026-08-06 & Completed & Cloud report artifacts and the final cloud state were added to the project dataset. The recovered run completed all 10 batches and produced 50,000 selected records, 929 covered lookup syllables (52.13\%), 3,155,451 syllable tokens, and CV 3.0341. Coverage-priority selection was added for batches 11--20, reusing the existing cloud pool without re-extraction. \\
 \addlinespace
 \rule{0pt}{3.6em}\textit{YYYY-MM-DD} & \textit{Planned, active, or complete} & \textit{State the goal, files or commands changed, measured result, validation performed, blockers, and the next action.} \\
 \addlinespace
@@ -128,7 +144,7 @@ Existing corpus consistency & Passed: 10 batches, 50,000 selected records, 50,00
 \section{End-of-Day Update Procedure}
 At the end of each workday, provide the day's commands, outputs, errors, decisions, and completed tasks. Then request:
 \begin{quote}
-\textit{Update \texttt{docs/technical\_progress\_report.tex} for today's work. Include completed work, measured results, validation, blockers, next steps, and any changes to the corpus or distribution statistics. Compile and verify the PDF afterwards.}
+\textit{Update \texttt{docs/technical\_progress\_report.tex} for today's work. Include completed work, measured results, validation, blockers, next steps, and any changes to the corpus or distribution statistics. Compile the PDF only when explicitly requested.}
 \end{quote}
 The update should add a Daily Work Log row and revise the relevant technical sections whenever the design, validation evidence, risks, or results change.
 \end{document}
