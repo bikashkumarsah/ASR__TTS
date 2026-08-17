@@ -1,0 +1,66 @@
+# Paths are resolved relative to --input-root. Corpus order defines which
+# dataset receives attribution when an exact normalized text occurs in several.
+corpora:
+  - name: IRIIS Nepali Text Corpus
+    slug: iriis_nepali_text_corpus
+    kind: parquet
+    repo_id: IRIIS-RESEARCH/Nepali-Text-Corpus
+    revision: main
+    path: IRIIS-RESEARCH__Nepali-Text-Corpus
+    file_glob: "data/*.parquet"
+    text_column: Article
+    metadata_columns:
+      source: Source
+    download_patterns:
+      - "data/*.parquet"
+      - README.md
+      - LICENSE
+
+  - name: Sakonii Nepali language-model dataset
+    slug: sakonii_nepalitext_lm
+    kind: parquet
+    repo_id: Sakonii/nepalitext-language-model-dataset
+    revision: main
+    path: Sakonii__nepalitext-language-model-dataset
+    file_glob: "**/*.parquet"
+    text_column: text
+    download_patterns:
+      - "**/*.parquet"
+      - README.md
+
+  - name: CC100 Nepali cleaned corpus
+    slug: cc100_nepali
+    kind: parquet
+    repo_id: himalaya-ai/cc100-nepali
+    revision: main
+    path: himalaya-ai__cc100-nepali
+    file_glob: "**/*.parquet"
+    text_column: text
+    metadata_columns:
+      source: source
+    download_patterns:
+      - "**/*.parquet"
+      - README.md
+
+  - name: IEEE DataPort large-scale Nepali corpus
+    slug: ieee_compiled
+    kind: html_paragraphs
+    source_uri: s3://ieee-dataport/open/14206/compiled.txt
+    path: ieee_dataport/compiled.txt
+
+  - name: Boredoom17 Nepali Corpus
+    slug: boredoom17_nepali_corpus
+    kind: parquet
+    repo_id: Boredoom17/Nepali-Corpus
+    revision: main
+    path: Boredoom17__Nepali-Corpus
+    file_glob: "**/*.parquet"
+    text_column: text
+    metadata_columns:
+      source: source
+      domain: domain
+      script: script
+      license: license
+    download_patterns:
+      - "**/*.parquet"
+      - README.md

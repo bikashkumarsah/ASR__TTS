@@ -16,3 +16,4 @@ Source_book.txt
 
 # ASR Corpus generated files
 dataset/asr_corpus/
+dataset_analysis/

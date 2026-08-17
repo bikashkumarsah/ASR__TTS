@@ -3,3 +3,4 @@ ipykernel
 tqdm
 pyyaml
 pyarrow
+huggingface_hub

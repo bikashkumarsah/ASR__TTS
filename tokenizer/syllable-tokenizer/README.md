@@ -85,3 +85,11 @@ If you use this tokenizer, cite the [following paper](https://aclanthology.org/2
 ```
 
 __Note__: The date of publication of the literature is 2023, but code is reproduced and published in 2026 May. Please use the date of publication of the literature for citation.
+
+## Five-corpus distribution analysis
+
+For streaming per-corpus and exact cross-corpus-deduplicated analysis, use
+`python -m corpus_analysis.pipeline` from the `scripts` directory. The full
+Google Cloud workflow, output definitions, validation procedure, and retrieval
+instructions are documented in
+[`../../docs/nepali_corpus_syllable_analysis.md`](../../docs/nepali_corpus_syllable_analysis.md).
