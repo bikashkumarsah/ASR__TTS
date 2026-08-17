@@ -206,3 +206,32 @@ python scripts/syllabic_tokenizer.py
 
 See [the tokenizer README](tokenizer/syllable-tokenizer/README.md) for library
 usage, vocabulary generation, and the academic citation.
+
+## Analyze syllables across five public Nepali corpora
+
+The repository also includes a separate, non-destructive analysis workflow for
+IRIIS, Sakonii, cleaned CC100 Nepali, the IEEE DataPort `compiled.txt`, and
+Boredoom17. It produces per-corpus reports, a source-native combined view, and
+an authoritative exact-deduplicated union without changing the ASR corpus pool,
+batches, state, or final 50k dataset.
+
+Use the fixed lookup tokenizer with every cloud CPU core:
+
+```bash
+cd tokenizer/syllable-tokenizer/scripts
+CLOUD_WORKERS="$(nproc)"
+
+python -m corpus_analysis.pipeline validate-inputs \
+  --config ../configs/nepali_corpus_analysis.yaml \
+  --input-root /data/nepali-corpora
+
+python -m corpus_analysis.pipeline analyze \
+  --config ../configs/nepali_corpus_analysis.yaml \
+  --input-root /data/nepali-corpora \
+  --output-root ../dataset_analysis \
+  --workers "$CLOUD_WORKERS"
+```
+
+See [the complete Google Cloud and reporting guide](docs/nepali_corpus_syllable_analysis.md)
+for pinned downloads, the 100k-record smoke test, result interpretation,
+validation, GCS upload, and the minimum files to retrieve from the cloud.
