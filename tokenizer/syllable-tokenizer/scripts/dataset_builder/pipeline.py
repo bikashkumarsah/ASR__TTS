@@ -32,6 +32,12 @@ from dataset_builder.balance import (
 )
 from dataset_builder.analyze import generate_batch_report
 from dataset_builder.coverage import build_source_syllable_inventory, load_coverage_targets
+from dataset_builder.diverse import (
+    build_diverse_final,
+    compare_prepared_pools,
+    prepare_five_corpus_pool,
+    update_progress_markdown,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -276,6 +282,47 @@ def cmd_coverage_inventory(args):
     )
 
 
+def cmd_prepare_five_corpus_pool(args):
+    prepare_five_corpus_pool(
+        corpus_config=args.config,
+        input_root=args.input_root,
+        output_dir=args.output_dir,
+        diverse_config=args.diverse_config,
+        candidate_limit=args.candidate_limit,
+        workers=args.workers,
+        resume=args.resume,
+        max_records_per_corpus=args.max_records_per_corpus,
+    )
+
+
+def cmd_build_diverse_final(args):
+    baseline = args.baseline
+    if baseline is None:
+        default_baseline = _CORPUS_DIR / "final_50k_all_syllables.jsonl"
+        baseline = str(default_baseline) if default_baseline.exists() else None
+    build_diverse_final(
+        pool_dir=args.pool_dir,
+        output=args.output,
+        target_size=args.target_size,
+        diverse_config=args.diverse_config,
+        workers=args.workers,
+        resume=args.resume,
+        baseline=baseline,
+        seed=args.seed,
+    )
+
+
+def cmd_compare_prepared_pools(args):
+    compare_prepared_pools(args.left, args.right)
+
+
+def cmd_update_progress(args):
+    update_progress_markdown(
+        run_report=args.run_report,
+        progress_file=args.progress_file,
+    )
+
+
 def _metadata_balance_summary(
     records: list[dict],
     expected_labels: dict[str, list[str]],
@@ -467,7 +514,9 @@ def cmd_status(args):
     print(f"{'='*60}")
     print(f"  Total selected     : {state.get('total_selected', 0)}")
     print(f"  Batches completed  : {state.get('batches_completed', 0)}")
-    print(f"  Cumulative CV      : {state.get('cumulative_cv', 'N/A')}")
+    print(f"  Normalized entropy : {state.get('cumulative_normalized_entropy', 'N/A')}")
+    print(f"  Gini               : {state.get('cumulative_gini', 'N/A')}")
+    print(f"  CV (diagnostic)    : {state.get('cumulative_cv', 'N/A')}")
     print(f"  Unique syllables   : {state.get('cumulative_unique_syllables', 'N/A')}")
 
     meta = state.get("cumulative_meta_counts", {})
@@ -618,6 +667,80 @@ Examples:
     p_final.add_argument("--workers", type=int, default=None,
                          help="Parallel worker processes (default: CPU count)")
     p_final.set_defaults(func=cmd_build_final)
+
+    # ---- prepare-five-corpus-pool ----
+    p_prepare_diverse = subparsers.add_parser(
+        "prepare-five-corpus-pool",
+        help="Prepare an exact-deduplicated, rare-aware shortlist from five corpora",
+    )
+    p_prepare_diverse.add_argument("--config", required=True,
+                                   help="Five-corpus source configuration YAML")
+    p_prepare_diverse.add_argument("--input-root", required=True,
+                                   help="Root containing the downloaded raw corpora")
+    p_prepare_diverse.add_argument("--output-dir", required=True,
+                                   help="Checkpointed shortlist directory")
+    p_prepare_diverse.add_argument(
+        "--diverse-config",
+        default=str(_PROJECT_ROOT / "configs" / "final_50k_diverse.yaml"),
+        help="Pinned diverse-final configuration",
+    )
+    p_prepare_diverse.add_argument("--candidate-limit", type=int, default=None)
+    p_prepare_diverse.add_argument(
+        "--max-records-per-corpus",
+        type=int,
+        default=None,
+        help="Bounded smoke-test limit for each source corpus",
+    )
+    p_prepare_diverse.add_argument("--workers", type=int, default=None,
+                                   help="Preparation workers (default: all CPU cores)")
+    p_prepare_diverse.add_argument("--resume", action="store_true")
+    p_prepare_diverse.set_defaults(func=cmd_prepare_five_corpus_pool)
+
+    p_compare_prepare = subparsers.add_parser(
+        "compare-prepared-pools",
+        help="Compare one-worker and all-core preparation artifacts",
+    )
+    p_compare_prepare.add_argument("--left", required=True)
+    p_compare_prepare.add_argument("--right", required=True)
+    p_compare_prepare.set_defaults(func=cmd_compare_prepared_pools)
+
+    # ---- build-diverse-final ----
+    p_diverse = subparsers.add_parser(
+        "build-diverse-final",
+        help="Build the calibrated semantic-diverse, rare-aware final corpus",
+    )
+    p_diverse.add_argument("--pool-dir", required=True)
+    p_diverse.add_argument("--target-size", type=int, default=50_000)
+    p_diverse.add_argument(
+        "--output",
+        default=str(_CORPUS_DIR / "final_50k_diverse_rare.jsonl"),
+    )
+    p_diverse.add_argument(
+        "--diverse-config",
+        default=str(_PROJECT_ROOT / "configs" / "final_50k_diverse.yaml"),
+    )
+    p_diverse.add_argument(
+        "--baseline",
+        default=None,
+        help="Previous 50k JSONL for entropy, Gini, JSD and similarity acceptance",
+    )
+    p_diverse.add_argument("--workers", type=int, default=None,
+                           help="Total CPU cores available (default: all)")
+    p_diverse.add_argument("--seed", type=int, default=42)
+    p_diverse.add_argument("--resume", action="store_true")
+    p_diverse.set_defaults(func=cmd_build_diverse_final)
+
+    # ---- update-progress ----
+    p_progress = subparsers.add_parser(
+        "update-progress",
+        help="Idempotently update the authoritative Markdown progress report",
+    )
+    p_progress.add_argument("--run-report", required=True)
+    p_progress.add_argument(
+        "--progress-file",
+        default=str(_PROJECT_ROOT.parent.parent / "docs" / "technical_progress_report.md"),
+    )
+    p_progress.set_defaults(func=cmd_update_progress)
 
     # ---- merge ----
     p_merge = subparsers.add_parser("merge", help="Merge all batches into final corpus")

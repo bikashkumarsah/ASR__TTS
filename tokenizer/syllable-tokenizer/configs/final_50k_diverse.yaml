@@ -1,0 +1,37 @@
+lookup_vocabulary:
+  path: dataset/nepali_syllables_lookup.vocab
+  sha256: 2f5c5ef869018f9af151a853a0db42fadfd38f0ee1f06de8e6a9a72b39b417c5
+  raw_entries: 1782
+  analytical_entries: 1781
+
+preparation:
+  min_syllables: 5
+  max_syllables: 80
+  candidate_limit: 1200000
+  candidates_per_syllable: 512
+  chunk_size: 10000
+  minhash_permutations: 128
+  lexical_jaccard_threshold: 0.85
+
+embedding:
+  model: intfloat/multilingual-e5-small
+  prefix: "query: "
+  evaluation_model: sentence-transformers/LaBSE
+  evaluation_prefix: ""
+  calibration_size: 100000
+  benchmark_size: 10000
+  memory_limit_gb: 96
+  layouts:
+    - [4, 8]
+    - [8, 4]
+    - [16, 2]
+
+selection:
+  target_size: 50000
+  tempering_exponent: 0.5
+  rare_floor: 5
+  faiss_clusters: 8192
+  initial_cluster_cap: 7
+  # Strict-to-permissive upper-tail cutoffs: p98, p99, then p99.5.
+  background_upper_tail_rates: [0.02, 0.01, 0.005]
+  score_weights: [0.60, 0.35, 0.05]

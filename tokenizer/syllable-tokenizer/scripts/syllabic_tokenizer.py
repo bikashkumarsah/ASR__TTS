@@ -10,6 +10,7 @@ import re
 _HTML_TAG_RE = re.compile(r"<[^>]*>")
 _NON_DEVA_RE = re.compile(r"[^\u0900-\u097F\s]")
 _SPACE_RE = re.compile(r"\s+")
+_MAX_TOKEN_LENGTH_CACHE = {}
 
 
 def clean_text(text):
@@ -32,14 +33,25 @@ def get_lookup_tokens(lookup_vocab_file="dataset/nepali_syllables_lookup.vocab")
     return syllabic_tokens
 
 
-def tokenize(sentense, lookup_vocab, debug = False):
+def _max_token_length(lookup_vocab):
+    """Cache the longest lookup entry for repeated sentence tokenization."""
+    key = id(lookup_vocab)
+    cached = _MAX_TOKEN_LENGTH_CACHE.get(key)
+    if cached is not None and cached[0] is lookup_vocab:
+        return cached[1]
+    value = max((len(token) for token in lookup_vocab), default=1)
+    _MAX_TOKEN_LENGTH_CACHE[key] = (lookup_vocab, value)
+    return value
+
+
+def tokenize(sentense, lookup_vocab, debug=False, max_token_length=None):
     sentense = clean_text(sentense)
     aligned_tokens = [ ]
     pos = 0
     print_debug(f"Total length of Sent : {len(sentense)}", debug)
     while (pos < len(sentense)):
         print_debug(f"current pos : {pos}", debug)
-        move_upto = 4
+        move_upto = max_token_length or _max_token_length(lookup_vocab)
         # if(pos == len(chars)-1): aligned_tokens.append(chars[pos])
 
         if pos + move_upto > (len(sentense)): move_upto = len(sentense) - pos

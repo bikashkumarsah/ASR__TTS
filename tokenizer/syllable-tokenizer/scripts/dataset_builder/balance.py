@@ -18,6 +18,7 @@ from itertools import product
 from pathlib import Path
 
 from .syllable_stats import _SKIP_TOKENS
+from syllable_metrics import distribution_statistics
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_ROOT = _SCRIPT_DIR.parent.parent
@@ -882,7 +883,8 @@ def select_balanced_batch(
 
     total_syl_tokens = sum(cumulative_syl_freq.values())
     unique_count = len(cumulative_syl_freq)
-    cv = _cv(list(cumulative_syl_freq.values()))
+    distribution = distribution_statistics(cumulative_syl_freq)
+    cv = distribution["coefficient_of_variation"]
 
     updated_state = {
         "selected_ids": all_selected_ids,
@@ -891,6 +893,9 @@ def select_balanced_batch(
         "cumulative_total_tokens": total_syl_tokens,
         "cumulative_unique_syllables": unique_count,
         "cumulative_cv": round(cv, 4),
+        "cumulative_entropy_bits": distribution["entropy_bits"],
+        "cumulative_normalized_entropy": distribution["normalized_entropy"],
+        "cumulative_gini": distribution["gini"],
         "cumulative_meta_counts": {k: dict(v) for k, v in meta_counts.items()},
         "batches_completed": corpus_state.get("batches_completed", 0) + 1,
     }

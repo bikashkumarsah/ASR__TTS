@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Iterable
 
 from syllabic_tokenizer import clean_text, tokenize
+from syllable_metrics import distribution_statistics
 
 
 def normalize_text(value: str) -> str:
@@ -163,35 +164,7 @@ def _histogram_statistics(histogram: Counter) -> dict:
 
 
 def _frequency_statistics(frequencies: Counter) -> dict:
-    counts = list(frequencies.values())
-    total = sum(counts)
-    unique = len(counts)
-    if not counts:
-        return {
-            "mean": 0,
-            "median": 0,
-            "std_dev": 0,
-            "coefficient_of_variation": 0,
-            "entropy_bits": 0,
-            "gini": 0,
-        }
-    counts_sorted = sorted(counts)
-    mean = total / unique
-    variance = sum((count - mean) ** 2 for count in counts) / unique
-    median = counts_sorted[unique // 2] if unique % 2 else (
-        counts_sorted[unique // 2 - 1] + counts_sorted[unique // 2]
-    ) / 2
-    entropy = -sum((count / total) * math.log2(count / total) for count in counts) if total else 0
-    weighted_sum = sum((index + 1) * count for index, count in enumerate(counts_sorted))
-    gini = (2 * weighted_sum) / (unique * total) - (unique + 1) / unique if total else 0
-    return {
-        "mean": round(mean, 4),
-        "median": median,
-        "std_dev": round(math.sqrt(variance), 4),
-        "coefficient_of_variation": round(math.sqrt(variance) / mean, 4) if mean else 0,
-        "entropy_bits": round(entropy, 6),
-        "gini": round(gini, 6),
-    }
+    return distribution_statistics(frequencies)
 
 
 def _cumulative_coverage(frequencies: Counter) -> dict[str, int]:

@@ -1,0 +1,12 @@
+# Optional CPU semantic-diversity stack for build-diverse-final.
+# These versions are deliberately separate from the lightweight tokenizer path.
+numpy==2.2.6
+scipy==1.15.3
+torch==2.7.1
+transformers==4.52.4
+sentence-transformers==5.0.0
+onnxruntime==1.22.1
+optimum[onnxruntime]==1.26.1
+faiss-cpu==1.11.0
+datasketch==1.6.5
+matplotlib==3.10.3

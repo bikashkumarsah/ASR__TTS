@@ -93,3 +93,83 @@ For streaming per-corpus and exact cross-corpus-deduplicated analysis, use
 Google Cloud workflow, output definitions, validation procedure, and retrieval
 instructions are documented in
 [`../../docs/nepali_corpus_syllable_analysis.md`](../../docs/nepali_corpus_syllable_analysis.md).
+
+## Diverse rare-aware final 50k corpus
+
+The final-corpus workflow uses the exact-deduplicated union of the five raw
+corpora, a square-root-tempered syllable target, MinHash-LSH lexical filtering,
+and empirically calibrated multilingual-E5 cosine similarity. Preparation is
+implemented as three bounded streaming passes: frequency/index construction,
+bounded hash-reservoir selection, and final shortlist materialization. Full
+records evicted from the bounded reservoirs are never cached. Normalized
+Shannon entropy and Gini are the headline balance metrics; CV is retained only
+as a diagnostic.
+
+Coverage is reported at three distinct layers: tokenizer-emittable vocabulary,
+five-corpus source support, and final selection coverage. The tokenizer derives
+its match window from the pinned vocabulary, including the five-to-seven-code-
+point entries that the previous fixed four-code-point window could not emit.
+The configuration's 1,781 analytical entries are a non-whitespace integrity
+count; the actual coverage denominator is 1,778 after excluding `।`, `?`, and
+`!`. Resume checkpoints pin the tokenizer source SHA-256 as well as the lookup
+vocabulary, and revalidate the complete emittable/unemittable inventory.
+Hard semantic cutoffs and final nearest-neighbour audits use exact FAISS
+`IndexFlatIP`. E5 is used for selection, while comparative semantic acceptance
+against the previous 50k corpus uses held-out LaBSE embeddings.
+
+Install the base and optional CPU ML dependencies on the 32-vCPU cloud VM:
+
+```bash
+python -m pip install -r tokenizer/syllable-tokenizer/requirements.txt
+python -m pip install -r tokenizer/syllable-tokenizer/requirements-diversity.txt
+```
+
+Then run from `tokenizer/syllable-tokenizer/scripts`:
+
+```bash
+CLOUD_WORKERS="$(nproc)"
+
+# Required bounded smoke test with one worker and all cores.
+python -m dataset_builder.pipeline prepare-five-corpus-pool \
+  --config ../configs/nepali_corpus_analysis.yaml \
+  --input-root /data/nepali-corpora \
+  --output-dir ../dataset/asr_corpus/five_corpus_pool_smoke_1 \
+  --max-records-per-corpus 100000 --candidate-limit 250000 \
+  --workers 1
+
+python -m dataset_builder.pipeline prepare-five-corpus-pool \
+  --config ../configs/nepali_corpus_analysis.yaml \
+  --input-root /data/nepali-corpora \
+  --output-dir ../dataset/asr_corpus/five_corpus_pool_smoke_all \
+  --max-records-per-corpus 100000 --candidate-limit 250000 \
+  --workers "$CLOUD_WORKERS"
+
+python -m dataset_builder.pipeline compare-prepared-pools \
+  --left ../dataset/asr_corpus/five_corpus_pool_smoke_1 \
+  --right ../dataset/asr_corpus/five_corpus_pool_smoke_all
+
+python -m dataset_builder.pipeline prepare-five-corpus-pool \
+  --config ../configs/nepali_corpus_analysis.yaml \
+  --input-root /data/nepali-corpora \
+  --output-dir ../dataset/asr_corpus/five_corpus_pool \
+  --candidate-limit 1200000 --workers "$CLOUD_WORKERS" --resume
+
+python -m dataset_builder.pipeline build-diverse-final \
+  --pool-dir ../dataset/asr_corpus/five_corpus_pool \
+  --target-size 50000 \
+  --baseline ../dataset/asr_corpus/final_50k_all_syllables.jsonl \
+  --output ../dataset/asr_corpus/final_50k_diverse_rare.jsonl \
+  --workers "$CLOUD_WORKERS" --resume
+
+python -m dataset_builder.pipeline update-progress \
+  --run-report ../dataset/asr_corpus/reports/final_50k_diverse_rare/report.json \
+  --progress-file ../../../docs/technical_progress_report.md
+```
+
+Use `compare-prepared-pools` to verify preparation artifact equality across the
+one-worker and all-core smoke runs on the same Python version and architecture.
+Embedding and FAISS stages are reproducible only with the fixed model revisions,
+software versions, quantization, seed, machine, and process/thread topology
+recorded in the manifest.
+For full acceptance comparison, keep the previous final 50k JSONL on the cloud
+and pass it with `--baseline`.
