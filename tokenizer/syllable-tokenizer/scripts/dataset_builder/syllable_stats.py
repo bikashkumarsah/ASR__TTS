@@ -17,6 +17,7 @@ _PROJECT_ROOT = _SCRIPT_DIR.parent.parent
 sys.path.insert(0, str(_SCRIPT_DIR.parent))
 
 from syllabic_tokenizer import get_lookup_tokens  # noqa: E402
+from syllable_metrics import distribution_statistics, rarity_counts  # noqa: E402
 
 # Punctuation/whitespace tokens to exclude from syllable frequency counts
 _SKIP_TOKENS = frozenset({" ", "।", "?", "!", "\t", "\n", ""})
@@ -43,7 +44,10 @@ def compute_syllable_stats(
     if vocab_path is None:
         vocab_path = _PROJECT_ROOT / "dataset" / "nepali_syllables_lookup.vocab"
 
-    lookup_vocab = get_lookup_tokens(str(vocab_path))
+    lookup_vocab = frozenset(
+        token for token in get_lookup_tokens(str(vocab_path))
+        if token.strip()
+    )
 
     freq = Counter()
     total_sentences = 0
@@ -69,8 +73,7 @@ def compute_syllable_stats(
     covered = sum(1 for s in lookup_vocab if s in freq)
     coverage = covered / vocab_size if vocab_size > 0 else 0.0
 
-    # Coefficient of variation
-    cv = _coefficient_of_variation(list(freq.values())) if freq else 0.0
+    distribution = distribution_statistics(freq)
 
     # Rare syllables (below average / 10)
     mean_freq = total_tokens / unique_count if unique_count > 0 else 0
@@ -84,7 +87,11 @@ def compute_syllable_stats(
         "vocab_size": vocab_size,
         "coverage": round(coverage, 4),
         "coverage_pct": round(coverage * 100, 2),
-        "cv": round(cv, 4),
+        "cv": distribution["coefficient_of_variation"],
+        "entropy_bits": distribution["entropy_bits"],
+        "normalized_entropy": distribution["normalized_entropy"],
+        "gini": distribution["gini"],
+        "rarity_counts": rarity_counts(freq),
         "rare_count": len(rare_syllables),
         "rare_threshold": round(rare_threshold, 1),
         "total_sentences": total_sentences,
@@ -113,13 +120,16 @@ def compute_cumulative_stats(
 
     total = sum(freq.values())
     unique = len(freq)
-    cv = _coefficient_of_variation(list(freq.values())) if freq else 0.0
+    distribution = distribution_statistics(freq)
 
     return {
         "cumulative_syllable_freq": dict(freq),
         "cumulative_total_tokens": total,
         "cumulative_unique_syllables": unique,
-        "cumulative_cv": round(cv, 4),
+        "cumulative_cv": distribution["coefficient_of_variation"],
+        "cumulative_entropy_bits": distribution["entropy_bits"],
+        "cumulative_normalized_entropy": distribution["normalized_entropy"],
+        "cumulative_gini": distribution["gini"],
     }
 
 

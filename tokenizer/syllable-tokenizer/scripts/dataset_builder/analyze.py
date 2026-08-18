@@ -12,6 +12,8 @@ from collections import Counter
 from itertools import product
 from pathlib import Path
 
+from syllable_metrics import distribution_statistics, rarity_counts
+
 from .syllable_stats import compute_syllable_stats, _coefficient_of_variation, _SKIP_TOKENS
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
@@ -104,15 +106,18 @@ def generate_batch_report(
 
     total_tokens = sum(syll_freq.values())
     unique_syls = len(syll_freq)
-    cv = _coefficient_of_variation(list(syll_freq.values()))
+    distribution = distribution_statistics(syll_freq)
 
     # Coverage against lookup vocab
     try:
         import sys
         sys.path.insert(0, str(_SCRIPT_DIR.parent))
         from syllabic_tokenizer import get_lookup_tokens
-        lookup = get_lookup_tokens(
-            str(_PROJECT_ROOT / "dataset" / "nepali_syllables_lookup.vocab")
+        lookup = frozenset(
+            token for token in get_lookup_tokens(
+                str(_PROJECT_ROOT / "dataset" / "nepali_syllables_lookup.vocab")
+            )
+            if token.strip()
         )
         covered = sum(1 for s in lookup if s in syll_freq)
         coverage = covered / len(lookup) if lookup else 0
@@ -128,7 +133,11 @@ def generate_batch_report(
     report["syllable_metrics"] = {
         "total_tokens": total_tokens,
         "unique_syllables": unique_syls,
-        "cv": round(cv, 4),
+        "cv": distribution["coefficient_of_variation"],
+        "entropy_bits": distribution["entropy_bits"],
+        "normalized_entropy": distribution["normalized_entropy"],
+        "gini": distribution["gini"],
+        "rarity_counts": rarity_counts(syll_freq),
         "coverage": round(coverage, 4),
         "coverage_pct": round(coverage * 100, 2),
         "covered_count": covered,
@@ -187,7 +196,9 @@ def _print_report_summary(report: dict):
     sm = report.get("syllable_metrics", {})
     print(f"\n  SYLLABLE METRICS:")
     print(f"    Unique syllables : {sm.get('unique_syllables', 0)}")
-    print(f"    CV               : {sm.get('cv', 0):.4f}")
+    print(f"    Normalized entropy: {sm.get('normalized_entropy', 0):.6f}")
+    print(f"    Gini              : {sm.get('gini', 0):.6f}")
+    print(f"    CV (diagnostic)   : {sm.get('cv', 0):.4f}")
     print(f"    Coverage         : {sm.get('coverage_pct', 0):.1f}%")
 
     # Sentence length
