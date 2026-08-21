@@ -46,6 +46,25 @@ text and compares both corpora only on their shared observed support.
   over similarity; all resulting exceptions are recorded.
 - Metadata balance is a soft objective and source composition is unconstrained.
 
+## Resource envelope
+
+The workflow targets a 64 GB / 12 vCPU cloud runner.
+
+- Preparation submits a bounded window of tokenization batches to its worker
+  pool, so parent memory during the three streaming passes is capped by the
+  window rather than by the total number of source sentences.
+- The embedding topologies in `configs/final_50k_diverse.yaml` are sized so
+  every candidate layout fits 12 vCPU; a layout set that cannot fit the
+  available workers now reports the fallback instead of silently degrading to a
+  single process.
+- The embedding worker fleet is capped at 40 GB of summed concurrent resident
+  memory.
+- The candidate matrix for a 1.2M pool is loaded into a preallocated array and
+  the raw copy is released after calibration, so only one candidates x
+  dimensions matrix is resident during selection.
+- Every stage prints its peak resident set size, because an out-of-memory kill
+  leaves no traceback.
+
 ## Daily verified runs
 
 Run sections below are generated idempotently from the machine-readable final
