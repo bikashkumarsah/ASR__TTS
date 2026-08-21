@@ -1,0 +1,396 @@
+{
+  "batch_id": 0,
+  "batch_size": 50000,
+  "metadata_distribution": {
+    "tense": {
+      "past": {
+        "count": 12525,
+        "pct": 25.05,
+        "deviation_from_uniform_pct": 0.2
+      },
+      "present": {
+        "count": 12520,
+        "pct": 25.04,
+        "deviation_from_uniform_pct": 0.16
+      },
+      "future": {
+        "count": 12439,
+        "pct": 24.88,
+        "deviation_from_uniform_pct": -0.49
+      },
+      "mixed": {
+        "count": 12516,
+        "pct": 25.03,
+        "deviation_from_uniform_pct": 0.13
+      }
+    },
+    "polarity": {
+      "positive": {
+        "count": 16617,
+        "pct": 33.23,
+        "deviation_from_uniform_pct": -0.3
+      },
+      "negative": {
+        "count": 16688,
+        "pct": 33.38,
+        "deviation_from_uniform_pct": 0.13
+      },
+      "neutral": {
+        "count": 16695,
+        "pct": 33.39,
+        "deviation_from_uniform_pct": 0.17
+      }
+    },
+    "gender": {
+      "masculine": {
+        "count": 16608,
+        "pct": 33.22,
+        "deviation_from_uniform_pct": -0.35
+      },
+      "feminine": {
+        "count": 16689,
+        "pct": 33.38,
+        "deviation_from_uniform_pct": 0.13
+      },
+      "neutral": {
+        "count": 16703,
+        "pct": 33.41,
+        "deviation_from_uniform_pct": 0.22
+      }
+    },
+    "sector": {
+      "news": {
+        "count": 5566,
+        "pct": 11.13,
+        "deviation_from_uniform_pct": 11.32
+      },
+      "literature": {
+        "count": 0,
+        "pct": 0.0,
+        "deviation_from_uniform_pct": -100.0
+      },
+      "formal": {
+        "count": 5565,
+        "pct": 11.13,
+        "deviation_from_uniform_pct": 11.3
+      },
+      "conversational": {
+        "count": 5564,
+        "pct": 11.13,
+        "deviation_from_uniform_pct": 11.28
+      },
+      "sports": {
+        "count": 5567,
+        "pct": 11.13,
+        "deviation_from_uniform_pct": 11.34
+      },
+      "technology": {
+        "count": 5479,
+        "pct": 10.96,
+        "deviation_from_uniform_pct": 9.58
+      },
+      "health": {
+        "count": 5565,
+        "pct": 11.13,
+        "deviation_from_uniform_pct": 11.3
+      },
+      "business": {
+        "count": 5567,
+        "pct": 11.13,
+        "deviation_from_uniform_pct": 11.34
+      },
+      "entertainment": {
+        "count": 5566,
+        "pct": 11.13,
+        "deviation_from_uniform_pct": 11.32
+      },
+      "education": {
+        "count": 5561,
+        "pct": 11.12,
+        "deviation_from_uniform_pct": 11.22
+      }
+    }
+  },
+  "crosstab_tense_gender": {
+    "past×masculine": 4177,
+    "past×feminine": 4171,
+    "past×neutral": 4177,
+    "present×masculine": 4169,
+    "present×feminine": 4173,
+    "present×neutral": 4178,
+    "future×masculine": 4088,
+    "future×feminine": 4176,
+    "future×neutral": 4175,
+    "mixed×masculine": 4174,
+    "mixed×feminine": 4169,
+    "mixed×neutral": 4173
+  },
+  "syllable_metrics": {
+    "total_tokens": 3154230,
+    "unique_syllables": 1168,
+    "cv": 3.4353,
+    "coverage": 0.6554,
+    "coverage_pct": 65.54,
+    "covered_count": 1168
+  },
+  "sentence_length": {
+    "min": 12,
+    "max": 80,
+    "median": 66,
+    "mean": 63.1
+  },
+  "top_syllables": [
+    {
+      "syllable": "र",
+      "count": 107642
+    },
+    {
+      "syllable": "न",
+      "count": 95133
+    },
+    {
+      "syllable": "को",
+      "count": 84388
+    },
+    {
+      "syllable": "मा",
+      "count": 80458
+    },
+    {
+      "syllable": "स",
+      "count": 72072
+    },
+    {
+      "syllable": "का",
+      "count": 70058
+    },
+    {
+      "syllable": "क",
+      "count": 64246
+    },
+    {
+      "syllable": "र्",
+      "count": 61720
+    },
+    {
+      "syllable": "न्",
+      "count": 61119
+    },
+    {
+      "syllable": "य",
+      "count": 58037
+    },
+    {
+      "syllable": "प",
+      "count": 57046
+    },
+    {
+      "syllable": "ग",
+      "count": 57040
+    },
+    {
+      "syllable": "त",
+      "count": 53215
+    },
+    {
+      "syllable": "ल",
+      "count": 53195
+    },
+    {
+      "syllable": "ए",
+      "count": 51532
+    },
+    {
+      "syllable": "म",
+      "count": 49945
+    },
+    {
+      "syllable": "ले",
+      "count": 49586
+    },
+    {
+      "syllable": "उ",
+      "count": 43599
+    },
+    {
+      "syllable": "ला",
+      "count": 41645
+    },
+    {
+      "syllable": "स्",
+      "count": 36912
+    }
+  ],
+  "rare_syllables": [
+    {
+      "syllable": "मुँ",
+      "count": 1
+    },
+    {
+      "syllable": "ङ्रु",
+      "count": 1
+    },
+    {
+      "syllable": "ग्रं",
+      "count": 1
+    },
+    {
+      "syllable": "हैँ",
+      "count": 1
+    },
+    {
+      "syllable": "ङ्री",
+      "count": 1
+    },
+    {
+      "syllable": "थौँ",
+      "count": 1
+    },
+    {
+      "syllable": "ध्रा",
+      "count": 1
+    },
+    {
+      "syllable": "सीँ",
+      "count": 1
+    },
+    {
+      "syllable": "र्रु",
+      "count": 1
+    },
+    {
+      "syllable": "ब्रै",
+      "count": 1
+    },
+    {
+      "syllable": "य्र",
+      "count": 1
+    },
+    {
+      "syllable": "ङं",
+      "count": 1
+    },
+    {
+      "syllable": "घौँ",
+      "count": 1
+    },
+    {
+      "syllable": "ध्रँ",
+      "count": 1
+    },
+    {
+      "syllable": "र्रै",
+      "count": 1
+    },
+    {
+      "syllable": "ङ्रा",
+      "count": 1
+    },
+    {
+      "syllable": "ठिँ",
+      "count": 1
+    },
+    {
+      "syllable": "क्षै",
+      "count": 1
+    },
+    {
+      "syllable": "दुँ",
+      "count": 1
+    },
+    {
+      "syllable": "ढ्र",
+      "count": 1
+    }
+  ],
+  "cumulative": {
+    "total_selected": 50000,
+    "cumulative_cv": 3.4353,
+    "batches_completed": 1
+  },
+  "source_coverage": {
+    "target_syllables": 1168,
+    "covered_syllables": 1168,
+    "missing_syllables": [],
+    "coverage_pct": 100.0
+  },
+  "final_curation": {
+    "target_size": 50000,
+    "coverage_required": true,
+    "max_candidates_per_cell": 8000,
+    "coverage_candidates_per_syllable": 256,
+    "max_metadata_deviation_pct_points": 2.0
+  },
+  "final_metadata_balance": {
+    "tense": {
+      "counts": {
+        "future": 12439,
+        "mixed": 12516,
+        "past": 12525,
+        "present": 12520
+      },
+      "ideal_pct": 25.0,
+      "max_abs_deviation_pct_points": 0.122,
+      "abs_deviation_pct_points": {
+        "future": 0.122,
+        "mixed": 0.032,
+        "past": 0.05,
+        "present": 0.04
+      }
+    },
+    "polarity": {
+      "counts": {
+        "negative": 16688,
+        "neutral": 16695,
+        "positive": 16617
+      },
+      "ideal_pct": 33.3333,
+      "max_abs_deviation_pct_points": 0.0993,
+      "abs_deviation_pct_points": {
+        "negative": 0.0427,
+        "neutral": 0.0567,
+        "positive": 0.0993
+      }
+    },
+    "gender": {
+      "counts": {
+        "feminine": 16689,
+        "masculine": 16608,
+        "neutral": 16703
+      },
+      "ideal_pct": 33.3333,
+      "max_abs_deviation_pct_points": 0.1173,
+      "abs_deviation_pct_points": {
+        "feminine": 0.0447,
+        "masculine": 0.1173,
+        "neutral": 0.0727
+      }
+    },
+    "sector": {
+      "counts": {
+        "business": 5567,
+        "conversational": 5564,
+        "education": 5561,
+        "entertainment": 5566,
+        "formal": 5565,
+        "health": 5565,
+        "news": 5566,
+        "sports": 5567,
+        "technology": 5479
+      },
+      "ideal_pct": 11.1111,
+      "max_abs_deviation_pct_points": 0.1531,
+      "abs_deviation_pct_points": {
+        "business": 0.0229,
+        "conversational": 0.0169,
+        "education": 0.0109,
+        "entertainment": 0.0209,
+        "formal": 0.0189,
+        "health": 0.0189,
+        "news": 0.0209,
+        "sports": 0.0229,
+        "technology": 0.1531
+      }
+    }
+  }
+}

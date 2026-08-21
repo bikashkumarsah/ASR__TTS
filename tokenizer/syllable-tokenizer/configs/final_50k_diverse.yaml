@@ -20,11 +20,18 @@ embedding:
   evaluation_prefix: ""
   calibration_size: 100000
   benchmark_size: 10000
-  memory_limit_gb: 96
+  # Ceiling for the summed concurrent RSS of the embedding worker fleet on the
+  # 64 GB / 12 vCPU cloud runner, leaving room for the parent, the OS and the
+  # SQLite page cache.
+  memory_limit_gb: 40
+  # (processes, threads_per_process).  Layouts whose product exceeds the worker
+  # count are discarded, so every entry must fit the 12 vCPU runner: the previous
+  # 32-way layouts were all filtered out and the stage silently degraded to a
+  # single process with no topology comparison at all.
   layouts:
-    - [4, 8]
-    - [8, 4]
-    - [16, 2]
+    - [3, 4]
+    - [6, 2]
+    - [12, 1]
 
 selection:
   target_size: 50000

@@ -10,16 +10,18 @@ from __future__ import annotations
 import csv
 import hashlib
 import heapq
+import itertools
 import json
 import math
 import os
 import platform
 import re
+import resource
 import sqlite3
 import sys
 import tempfile
 import time
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, deque
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -54,6 +56,28 @@ _WORKER_MAX_SYLLABLES = 80
 
 def _utc_run_id() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _peak_rss_gb() -> float:
+    """Peak resident set size of this process in GiB.
+
+    ``ru_maxrss`` is bytes on Darwin and kibibytes on Linux, so the cloud runner
+    and a local Mac would otherwise disagree by a factor of 1024.
+    """
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    divisor = 1024**3 if sys.platform == "darwin" else 1024**2
+    return peak / divisor
+
+
+def _log_rss(stage: str) -> None:
+    """Print the peak RSS reached by the end of ``stage``.
+
+    An out-of-memory kill leaves no traceback, so without a per-stage watermark
+    the only evidence of where a run died is the last line of stdout.  Printing
+    the watermark makes the growth curve visible before the kill instead of
+    after it.
+    """
+    print(f"[rss] {stage}: peak {_peak_rss_gb():.2f} GiB", flush=True)
 
 
 def _sha256(path: str | Path) -> str:
@@ -235,6 +259,14 @@ def _source_payloads(
             yield row.get("text"), row.get("metadata", {}), spec.slug
 
 
+def _prepare_record_batch(payloads: list[tuple[str, dict, str]]) -> list[dict]:
+    """Tokenize and annotate one bounded payload batch inside a worker process."""
+    prepared: list[dict] = []
+    for payload in payloads:
+        prepared.extend(_prepare_record_worker(payload))
+    return prepared
+
+
 def _processed_records(
     config_path: Path,
     input_root: Path,
@@ -245,7 +277,8 @@ def _processed_records(
     max_syllables: int,
     workers: int,
     max_records_per_corpus: int | None = None,
-    chunksize: int = 4,
+    chunksize: int = 64,
+    max_pending_batches: int | None = None,
 ) -> Iterator[dict]:
     payloads = _source_payloads(config_path, input_root, max_records_per_corpus)
     initializer = (str(vocab_path), str(rules_path), min_syllables, max_syllables)
@@ -254,12 +287,27 @@ def _processed_records(
         for payload in payloads:
             yield from _prepare_record_worker(payload)
         return
+    # ``Executor.map`` builds its whole future list with a comprehension before
+    # yielding the first result, so mapping it across a five-corpus generator
+    # makes the parent hold every source sentence at once.  Submit a bounded
+    # window and refill it in FIFO order instead: the yielded sequence stays
+    # identical to ``map`` while resident payloads are capped at
+    # ``max_pending_batches * chunksize``.
+    batches = iter(lambda: list(itertools.islice(payloads, chunksize)), [])
+    in_flight = max(1, int(max_pending_batches or workers * 4))
     with ProcessPoolExecutor(
         max_workers=workers,
         initializer=_init_prepare_worker,
         initargs=initializer,
     ) as executor:
-        for records in executor.map(_prepare_record_worker, payloads, chunksize=chunksize):
+        pending: deque = deque(
+            executor.submit(_prepare_record_batch, batch)
+            for batch in itertools.islice(batches, in_flight)
+        )
+        while pending:
+            records = pending.popleft().result()
+            for batch in itertools.islice(batches, 1):
+                pending.append(executor.submit(_prepare_record_batch, batch))
             yield from records
 
 
@@ -507,8 +555,12 @@ def prepare_five_corpus_pool(
             sentence_frequency.update(record["unique_syllables"])
             if eligible % 100_000 == 0:
                 index.commit()
-                print(f"  unique eligible sentences: {eligible:,}")
+                print(
+                    f"  unique eligible sentences: {eligible:,}"
+                    f"  (peak {_peak_rss_gb():.2f} GiB)"
+                )
         index.commit()
+        _log_rss("prepare pass 1/3")
 
         source_observed = frozenset(sentence_frequency).intersection(selection_vocab)
         attainable = source_observed.intersection(tokenizer_emittable)
@@ -579,6 +631,7 @@ def prepare_five_corpus_pool(
                 break
             selected_hashes.add(digest)
         print("▸ Pass 3/3: stream and materialize only the final bounded shortlist")
+        _log_rss("prepare pass 2/3")
         index.reset_pass_seen()
         shortlist_dir = output_dir / "shortlist"
         for old in shortlist_dir.glob("part-*.jsonl") if shortlist_dir.exists() else []:
@@ -634,6 +687,7 @@ def prepare_five_corpus_pool(
         }
         _write_json(complete, state)
         print(f"✓ Prepared {written:,} exact-deduplicated candidates at {output_dir}")
+        _log_rss("prepare pass 3/3")
         return output_dir
     finally:
         index.close()
@@ -879,6 +933,7 @@ def build_lexical_annotations(
         }
         _write_json(complete, state)
         print(f"✓ MinHash-LSH marked {duplicates:,}/{total:,} lexical near-duplicates")
+        _log_rss("lexical annotations")
         return output_dir
     finally:
         index.close()
@@ -1180,11 +1235,25 @@ def embed_shortlist(
     model_path = pool_dir / "model" / model_manifest["onnx_relative_path"]
     tokenizer_path = model_path.parent
     max_workers = max(1, int(workers or os.cpu_count() or 1))
-    layouts = [
+    configured_layouts = [
         (int(item[0]), int(item[1]))
         for item in embedding_config.get("layouts", [[4, 8], [8, 4], [16, 2]])
-        if int(item[0]) * int(item[1]) <= max_workers
-    ] or [(1, max_workers)]
+    ]
+    layouts = [
+        (processes, threads)
+        for processes, threads in configured_layouts
+        if processes * threads <= max_workers
+    ]
+    if not layouts:
+        # Falling back silently would run the whole corpus through a single
+        # process while the report still claims a benchmarked topology, so say
+        # so loudly instead of hiding a large throughput loss.
+        print(
+            f"! No configured embedding layout fits {max_workers} workers "
+            f"(configured: {configured_layouts}); falling back to 1 process x "
+            f"{max_workers} threads with no topology comparison"
+        )
+        layouts = [(1, max_workers)]
     benchmark_size = int(embedding_config.get("benchmark_size", 10_000))
     # Use lexically annotated records for both benchmark and final encoding.
     lexical_files = sorted((pool_dir / "lexical").glob("part-*.jsonl"))
@@ -1288,25 +1357,44 @@ def _load_candidates_and_embeddings(pool_dir: Path):
 
     state = json.loads((pool_dir / "embeddings.complete.json").read_text(encoding="utf-8"))
     records: list[dict] = []
-    arrays = []
     lexical_dir = pool_dir / "lexical"
+    # Size the destination from the shard headers first.  Collecting per-shard
+    # float32 copies and calling ``np.concatenate`` would hold the shards and the
+    # joined array at the same time, doubling the resident embedding matrix.
+    shard_plan = []
+    total_rows = 0
+    dimensions = None
     for shard in state["shards"]:
+        array_path = pool_dir / "embeddings" / shard["array"]
+        header = np.load(array_path, mmap_mode="r")
+        if dimensions is None:
+            dimensions = int(header.shape[1])
+        elif int(header.shape[1]) != dimensions:
+            raise RuntimeError(f"Embedding dimension mismatch for {array_path}")
+        shard_plan.append((shard, array_path, int(header.shape[0])))
+        total_rows += int(header.shape[0])
+        del header
+    if not shard_plan or dimensions is None:
+        raise RuntimeError("No embedding shards were produced")
+    embeddings = np.empty((total_rows, dimensions), dtype=np.float32)
+    offset = 0
+    for shard, array_path, rows in shard_plan:
         input_path = lexical_dir / shard["input"]
         ids_path = pool_dir / "embeddings" / shard["ids"]
-        array_path = pool_dir / "embeddings" / shard["array"]
         with open(input_path, "r", encoding="utf-8") as handle:
             shard_records = [json.loads(line) for line in handle if line.strip()]
         ids = ids_path.read_text(encoding="utf-8").splitlines()
         if [row["normalized_sha256"] for row in shard_records] != ids:
             raise RuntimeError(f"Embedding ID order mismatch for {input_path}")
-        array = np.load(array_path, mmap_mode="r")
-        if len(array) != len(shard_records):
+        if rows != len(shard_records):
             raise RuntimeError(f"Embedding count mismatch for {input_path}")
+        array = np.load(array_path, mmap_mode="r")
+        # Assigning into the preallocated slice widens float16 to float32 in
+        # place, so no whole-shard temporary is materialized.
+        embeddings[offset:offset + rows] = array
+        del array
+        offset += rows
         records.extend(shard_records)
-        arrays.append(np.asarray(array, dtype=np.float32))
-    if not arrays:
-        raise RuntimeError("No embedding shards were produced")
-    embeddings = np.concatenate(arrays, axis=0)
     return records, embeddings, state
 
 
@@ -1353,7 +1441,29 @@ class EmbeddingTransform:
             output = output @ self.components
         if self.scales is not None:
             output = output * self.scales
-        return _normalize_rows(output).astype(np.float32)
+        return _normalize_rows(output).astype(np.float32, copy=False)
+
+
+def _paired_cosines(values, left, right, *, block: int = 65_536):
+    """Row-wise dot products for index pairs without materializing gathered copies.
+
+    ``values[left] * values[right]`` would allocate three arrays the size of the
+    pair list times the embedding width; on a 500k-pair background sample that is
+    over 2 GB of transient. Blocking keeps the transient proportional to ``block``.
+    """
+    import numpy as np
+
+    left = np.asarray(left, dtype=np.int64)
+    right = np.asarray(right, dtype=np.int64)
+    output = np.empty(len(left), dtype=np.float32)
+    for start in range(0, len(left), block):
+        stop = start + block
+        # ``np.sum(..., axis=1)`` reduces each row independently, so blocking
+        # yields bit-identical results to the unblocked expression.
+        output[start:stop] = np.sum(
+            values[left[start:stop]] * values[right[start:stop]], axis=1
+        )
+    return output
 
 
 def calibrate_embeddings(
@@ -1389,11 +1499,12 @@ def calibrate_embeddings(
     # Those pairs are retained only as a diagnostic, not as semantic ground truth.
     chosen_transform = EmbeddingTransform("raw")
     transformed = chosen_transform.apply(embeddings)
-    background = np.sum(transformed[left] * transformed[right], axis=1)
-    lexical_pair_cosines = np.asarray([
-        float(transformed[first] @ transformed[second])
-        for first, second in positive_pairs
-    ])
+    background = _paired_cosines(transformed, left, right)
+    lexical_pair_cosines = _paired_cosines(
+        transformed,
+        np.asarray([first for first, _ in positive_pairs], dtype=np.int64),
+        np.asarray([second for _, second in positive_pairs], dtype=np.int64),
+    )
     rates = [float(value) for value in config.get("selection", {}).get(
         "background_upper_tail_rates", [0.02, 0.01, 0.005]
     )]
@@ -1993,6 +2104,7 @@ def build_diverse_final(
         resume=resume,
     )
     records, raw_embeddings, embedding_state = _load_candidates_and_embeddings(pool_dir)
+    _log_rss("candidate and embedding load")
     calibration_dir = report_dir / "calibration"
     if resume and (calibration_dir / "similarity_calibration.json").exists():
         transformed, background, thresholds, calibration, _transform = load_calibration(
@@ -2012,6 +2124,11 @@ def build_diverse_final(
             output_dir=calibration_dir,
             seed=seed,
         )
+    # ``transformed`` is a freshly allocated matrix in both branches above, so the
+    # raw float32 copy is dead from here on.  Holding both for the remainder of the
+    # build would keep a second candidates x dimensions matrix resident for nothing.
+    del raw_embeddings
+    _log_rss("calibration")
     inventory = json.loads((pool_dir / "frequency_inventory.json").read_text(encoding="utf-8"))
     attainable = frozenset(inventory["attainable_syllables"])
     checkpoint_dir = report_dir / "checkpoints"
@@ -2072,6 +2189,7 @@ def build_diverse_final(
             "faiss_threads": faiss_threads,
         }
         _write_json(selection_state_path, serializable_selection)
+    _log_rss("selection")
     frequencies = Counter(selection["frequencies"])
     distribution = distribution_statistics(frequencies, inventory=attainable)
     target = selection["target"]

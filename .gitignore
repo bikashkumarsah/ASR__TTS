@@ -13,6 +13,14 @@ compiled.txt
 Source_book.txt
 *.parquet
 *.jsonl
+*.zip
+*.sqlite3*
+
+# Generated analysis outputs
+20260817T161231Z/
+
+asr_corpus_baseline_150k/
+
 
 # ASR Corpus generated files
 dataset/asr_corpus/
