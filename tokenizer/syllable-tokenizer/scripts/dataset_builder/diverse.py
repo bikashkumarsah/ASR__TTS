@@ -2061,6 +2061,26 @@ def _write_figures(report_dir: Path, frequencies: Counter, nearest: dict) -> Non
         plt.close(fig)
 
 
+def _target_size_label(target_size: int) -> str:
+    return f"{target_size // 1000}k" if target_size % 1000 == 0 else str(target_size)
+
+
+def _validate_baseline_size(baseline: str | Path, target_size: int) -> int:
+    """Require a size-matched baseline before enabling comparative gates."""
+    path = Path(baseline)
+    if not path.is_file():
+        raise FileNotFoundError(f"Baseline corpus not found: {path}")
+    with open(path, "r", encoding="utf-8") as handle:
+        records = sum(bool(line.strip()) for line in handle)
+    if records != target_size:
+        raise ValueError(
+            f"Comparative acceptance requires a size-matched baseline: "
+            f"candidate target is {target_size:,}, baseline contains {records:,}. "
+            "Omit --baseline for an exploratory build or provide an equal-size baseline."
+        )
+    return records
+
+
 def build_diverse_final(
     *,
     pool_dir: str | Path,
@@ -2073,6 +2093,8 @@ def build_diverse_final(
     seed: int = 42,
 ) -> Path:
     """Run lexical, embedding, calibration, selection and verified reporting."""
+    if baseline:
+        _validate_baseline_size(baseline, target_size)
     _require_ml_stack()
     import numpy as np
 
@@ -2410,7 +2432,7 @@ def build_diverse_final(
     with open(output, "w", encoding="utf-8") as handle:
         for index, record in enumerate(selected):
             record["id"] = f"diverse_final_{index:08d}"
-            record["batch_id"] = "final_50k_diverse_rare"
+            record["batch_id"] = f"final_{_target_size_label(target_size)}_diverse_rare"
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
     manifest = {
         "run_id": report["run_id"],
@@ -2489,7 +2511,7 @@ def update_progress_markdown(
         else "failed"
     )
     block = f"""{start}
-### {run_id}: Diverse rare-aware 50k corpus
+### {run_id}: Diverse rare-aware {_target_size_label(report['target_size'])} corpus
 
 - Records: {report['target_size']:,}
 - Attainable syllables: {report['vocabulary']['attainable_entries']:,}
