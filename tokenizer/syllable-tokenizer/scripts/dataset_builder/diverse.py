@@ -13,6 +13,7 @@ import heapq
 import itertools
 import json
 import math
+import multiprocessing
 import os
 import platform
 import re
@@ -1171,11 +1172,17 @@ def _run_embedding_layout(
     batch_size: int,
     prefix: str = "query: ",
 ) -> tuple[list[dict], float]:
+    # The parent has already initialized Hugging Face tokenizers, PyTorch and
+    # ONNX for tolerance validation.  Forking that native thread state can
+    # terminate a child without a Python exception (BrokenProcessPool).  Spawn
+    # gives every embedding worker a clean interpreter and native runtime.
+    context = multiprocessing.get_context("spawn")
     started = time.monotonic()
     with ProcessPoolExecutor(
         max_workers=processes,
         initializer=_init_embedding_worker,
         initargs=(str(model_path), str(tokenizer_path), threads, batch_size, prefix),
+        mp_context=context,
     ) as executor:
         results = list(executor.map(_embed_shard_worker, tasks))
     return results, time.monotonic() - started
@@ -1203,6 +1210,10 @@ def embed_shortlist(
 ) -> Path:
     """Export/quantize E5, benchmark CPU topology, and embed all candidates."""
     _require_ml_stack()
+    # Set this before any tokenizer/model initialization.  Worker processes
+    # inherit it, preventing Rust tokenizer thread pools from being created in
+    # both the parent and child process.
+    os.environ["TOKENIZERS_PARALLELISM"] = "false"
     pool_dir = Path(pool_dir)
     config = _load_yaml(diverse_config)
     config_fingerprint = _config_fingerprint(config)
@@ -1340,6 +1351,7 @@ def embed_shortlist(
         "benchmark": benchmark_results,
         "onnx_pytorch_validation": onnx_validation,
         "chosen_layout": chosen,
+        "worker_start_method": "spawn",
         "fixed_topology_reproducibility_only": True,
         "elapsed_seconds": round(elapsed, 3),
         "shards": results,
