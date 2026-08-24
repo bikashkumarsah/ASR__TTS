@@ -35,6 +35,14 @@ from syllabic_tokenizer import get_lookup_tokens, tokenize  # noqa: E402
 
 
 class SharedMetricTest(unittest.TestCase):
+    def test_comparative_baseline_must_match_target_size(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            baseline = Path(temporary) / "baseline.jsonl"
+            baseline.write_text("{}\n{}\n", encoding="utf-8")
+            self.assertEqual(diverse_module._validate_baseline_size(baseline, 2), 2)
+            with self.assertRaisesRegex(ValueError, "size-matched baseline"):
+                diverse_module._validate_baseline_size(baseline, 1)
+
     def test_embedding_pool_uses_spawn_context(self):
         from unittest.mock import MagicMock, patch
 
