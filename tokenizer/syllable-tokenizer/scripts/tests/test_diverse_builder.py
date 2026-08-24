@@ -35,6 +35,23 @@ from syllabic_tokenizer import get_lookup_tokens, tokenize  # noqa: E402
 
 
 class SharedMetricTest(unittest.TestCase):
+    def test_embedding_pool_uses_spawn_context(self):
+        from unittest.mock import MagicMock, patch
+
+        executor = MagicMock()
+        executor.__enter__.return_value.map.return_value = []
+        with patch.object(diverse_module, "ProcessPoolExecutor", return_value=executor) as factory:
+            diverse_module._run_embedding_layout(
+                [],
+                model_path=Path("model.onnx"),
+                tokenizer_path=Path("tokenizer"),
+                processes=3,
+                threads=4,
+                batch_size=32,
+            )
+        context = factory.call_args.kwargs["mp_context"]
+        self.assertEqual(context.get_start_method(), "spawn")
+
     def test_config_fingerprint_changes_with_tokenizer_source(self):
         from unittest.mock import patch
 
