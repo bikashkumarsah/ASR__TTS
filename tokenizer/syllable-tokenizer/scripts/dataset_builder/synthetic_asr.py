@@ -1078,6 +1078,18 @@ def _existing_spend(connection: sqlite3.Connection) -> float:
     return float(row[0])
 
 
+def _effective_requests_per_minute(configured: int, override: int | None) -> int:
+    effective = configured if override is None else int(override)
+    if effective < 1:
+        raise ValueError("requests_per_minute must be at least 1")
+    if effective > configured:
+        raise ValueError(
+            f"Runtime requests_per_minute={effective} exceeds the configured safety ceiling "
+            f"of {configured}"
+        )
+    return effective
+
+
 class _RateLimiter:
     def __init__(self, requests_per_minute: int):
         self.limit = requests_per_minute
@@ -1152,6 +1164,7 @@ def synthesize_synthetic_asr(
     max_usd: float,
     workers: int | None = None,
     resume: bool = False,
+    requests_per_minute: int | None = None,
 ) -> dict[str, Any]:
     """Synthesize one resumable phase using only an already configured TTS API."""
     root = Path(run_dir).expanduser().resolve()
@@ -1204,7 +1217,9 @@ def synthesize_synthetic_asr(
         "tracked_spend_usd": spent, "allowance_usd": tts_cap, **forecast,
     })
 
-    limiter = _RateLimiter(int(config["google_tts"].get("requests_per_minute", 120)))
+    configured_rpm = int(config["google_tts"].get("requests_per_minute", 120))
+    effective_rpm = _effective_requests_per_minute(configured_rpm, requests_per_minute)
+    limiter = _RateLimiter(effective_rpm)
     database_lock = threading.Lock()
     budget_lock = threading.Lock()
     stop_for_budget = threading.Event()
@@ -1283,6 +1298,8 @@ def synthesize_synthetic_asr(
         "failed": len(errors),
         "duration_hours": sum(float(row[1]) for row in succeeded_rows) / 3600,
         "estimated_tts_cost_usd": sum(float(row[2]) for row in succeeded_rows),
+        "configured_requests_per_minute": configured_rpm,
+        "effective_requests_per_minute": effective_rpm,
         "errors": errors[:100],
     }
     _atomic_json(root / "reports" / f"synthesis_{phase}_summary.json", summary)
