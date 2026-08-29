@@ -741,7 +741,31 @@ def prepare_synthetic_asr(
             f"Expected exactly {target:,} usable canonical texts, got {len(normalized):,}; "
             f"{len(quarantine):,} were quarantined. Correct the input before synthesis."
         )
+    source_frequency = Counter(token for row in normalized for token in row["original_syllables"])
     frequency = Counter(token for row in normalized for token in row["syllables"])
+    normalization_removed = set(source_frequency).difference(frequency)
+    unexpected_removed = normalization_removed.difference(_DEVANAGARI_DIGITS)
+    if unexpected_removed:
+        raise RuntimeError(
+            "Spoken normalization removed non-numeric syllables: "
+            + ", ".join(sorted(unexpected_removed))
+        )
+    tokenizer_config = config.get("tokenizer", {})
+    expected_source = int(tokenizer_config.get("source_attainable_inventory", 0))
+    expected_spoken = int(
+        tokenizer_config.get(
+            "spoken_attainable_inventory",
+            tokenizer_config.get("attainable_inventory", 0),
+        )
+    )
+    if expected_source and len(source_frequency) < expected_source:
+        raise RuntimeError(
+            f"Source inventory contains {len(source_frequency):,}/{expected_source:,} required types"
+        )
+    if expected_spoken and len(frequency) < expected_spoken:
+        raise RuntimeError(
+            f"Spoken inventory contains {len(frequency):,}/{expected_spoken:,} required syllables"
+        )
     rare_threshold = int(config.get("rare_tail", {}).get("occurrence_threshold", 20))
     rare = {token for token, count in frequency.items() if count < rare_threshold}
     for row in normalized:
@@ -777,8 +801,14 @@ def prepare_synthetic_asr(
         "prepared_canonical": len(normalized),
         "quarantined": len(quarantine),
         "evaluation_overlap": sum(bool(row["evaluation_overlap"]) for row in normalized),
+        "source_observed_types": len(source_frequency),
+        "spoken_observed_syllables": len(frequency),
         "observed_syllables": len(frequency),
-        "expected_attainable_syllables": int(config.get("tokenizer", {}).get("attainable_inventory", 1358)),
+        "expected_source_attainable_types": expected_source,
+        "expected_spoken_attainable_syllables": expected_spoken,
+        "normalization_removed_numeric_symbols": {
+            token: int(source_frequency[token]) for token in sorted(normalization_removed)
+        },
         "rare_syllables": len(rare),
         "rare_extra_sentences": len(rare_support),
         "rare_frequency": dict(sorted((token, frequency[token]) for token in rare)),
@@ -2131,7 +2161,13 @@ def finalize_synthetic_asr(run_dir: str | Path, workers: int | None = None) -> d
     coverage = {token for row in canonical for token in row["syllables"]}
     inventory_path = root / "manifests" / "attainable_syllables.txt"
     attainable = {line for line in inventory_path.read_text(encoding="utf-8").splitlines() if line}
-    expected_minimum = int(config.get("tokenizer", {}).get("attainable_inventory", 1358))
+    tokenizer_config = config.get("tokenizer", {})
+    expected_minimum = int(
+        tokenizer_config.get(
+            "spoken_attainable_inventory",
+            tokenizer_config.get("attainable_inventory", 1348),
+        )
+    )
     missing_syllables = sorted(attainable.difference(coverage))
     rare_frequency = json.loads((root / "prepare.complete.json").read_text(encoding="utf-8")).get("rare_frequency", {})
     realizations: dict[str, set[str]] = defaultdict(set)

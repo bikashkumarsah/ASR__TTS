@@ -101,6 +101,31 @@ class SyntheticAsrTest(unittest.TestCase):
         self.assertIn("महिना", result["asr_text"])
         self.assertIn("गते", result["asr_text"])
 
+    def test_preparation_separates_numeric_glyphs_from_spoken_inventory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config_path = self._config(root, target=1)
+            input_path = root / "input.jsonl"
+            input_path.write_text(
+                json.dumps({"text": "१ नेपाल", "normalized_sha256": "a" * 64}, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            hashes = root / "eval_hashes.txt"
+            hashes.write_text("", encoding="utf-8")
+            slr = root / "slr.json"
+            slr.write_text(json.dumps({
+                "splits": {
+                    split: {"text_hashes": str(hashes)}
+                    for split in ("train", "dev", "test")
+                }
+            }), encoding="utf-8")
+            summary = prepare_synthetic_asr(input_path, slr, config_path, root / "run")
+            self.assertEqual(summary["normalization_removed_numeric_symbols"], {"१": 1})
+            self.assertNotEqual(
+                summary["source_observed_types"],
+                summary["spoken_observed_syllables"],
+            )
+
     def test_tokenizer_source_is_part_of_fingerprint(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
