@@ -107,6 +107,8 @@ quota, pass a lower runtime value such as `--requests-per-minute 5`; an override
 lower but never raise the checked-in safety ceiling and does not invalidate prepared
 checkpoints. A transferred run directory automatically rebases successful audio paths
 in its SQLite checkpoint when synthesis or CPU validation resumes on another host.
+Resolved tokenizer and vocabulary paths may change with the host, but relocation still
+requires identical configuration, tokenizer, vocabulary, and lookup-entry checksums.
 
 ```bash
 python -m dataset_builder.pipeline synthesize-synthetic-asr \

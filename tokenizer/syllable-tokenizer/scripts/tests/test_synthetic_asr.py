@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import sys
 import tempfile
 import unittest
@@ -18,6 +19,7 @@ from dataset_builder.synthetic_asr import (
     _effective_requests_per_minute,
     _fingerprint,
     _init_job_db,
+    _load_run_config,
     _phase_jobs,
     _rebase_synthesis_paths,
     _voice_qualification,
@@ -121,6 +123,41 @@ class SyntheticAsrTest(unittest.TestCase):
             ).fetchone()
             connection.close()
             self.assertEqual(stored, (str(master), str(training)))
+
+    def test_prepared_run_fingerprint_survives_host_transfer(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config_path = self._config(root, target=1)
+            input_path = root / "input.jsonl"
+            input_path.write_text(
+                json.dumps({"text": "नेपाल राम्रो छ", "normalized_sha256": "a" * 64}, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            hashes = root / "eval_hashes.txt"
+            hashes.write_text("", encoding="utf-8")
+            slr = root / "slr.json"
+            slr.write_text(json.dumps({
+                "splits": {
+                    split: {"text_hashes": str(hashes)}
+                    for split in ("train", "dev", "test")
+                }
+            }), encoding="utf-8")
+            original = root / "original" / "run"
+            prepare_synthetic_asr(input_path, slr, config_path, original)
+            transferred = root / "transferred" / "run"
+            shutil.copytree(original, transferred)
+
+            config, resolved = _load_run_config(transferred)
+            self.assertEqual(resolved, (transferred / "synthetic_asr_config.yaml").resolve())
+            self.assertEqual(config["tokenizer"]["vocabulary"], "pins/nepali_syllables_lookup.vocab")
+
+            pinned_tokenizer = transferred / "pins" / "syllabic_tokenizer.py"
+            pinned_tokenizer.write_text(
+                pinned_tokenizer.read_text(encoding="utf-8") + "\n# incompatible transfer\n",
+                encoding="utf-8",
+            )
+            with self.assertRaises(RuntimeError):
+                _load_run_config(transferred)
 
     def test_ambiguous_numeric_form_is_quarantined(self):
         result = normalize_spoken_text("मिति ०१/०२/८१")
