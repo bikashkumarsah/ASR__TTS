@@ -149,6 +149,14 @@ def _fingerprint(config: Mapping[str, Any], config_path: Path) -> dict[str, Any]
     }
 
 
+def _portable_fingerprint(fingerprint: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the content identity while excluding host-specific resolved paths."""
+    portable = dict(fingerprint)
+    portable.pop("vocabulary_path", None)
+    portable.pop("tokenizer_source", None)
+    return portable
+
+
 def _run_quiet(command: Sequence[str], timeout: int = 30) -> tuple[bool, str]:
     try:
         result = subprocess.run(
@@ -840,7 +848,7 @@ def _load_run_config(run_dir: Path) -> tuple[dict[str, Any], Path]:
     if completion.exists():
         expected = json.loads(completion.read_text(encoding="utf-8")).get("run_fingerprints")
         actual = _fingerprint(config, resolved)
-        if expected and actual != expected:
+        if expected and _portable_fingerprint(actual) != _portable_fingerprint(expected):
             raise RuntimeError(
                 "Prepared run configuration, vocabulary, or tokenizer source changed; "
                 "use a fresh run directory instead of mixing artifacts."
