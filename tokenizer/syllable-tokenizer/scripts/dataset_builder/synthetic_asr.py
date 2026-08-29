@@ -268,7 +268,7 @@ def synthetic_asr_preflight(work_dir: str | Path, config_path: str | Path) -> di
         checks["google"]["existing_bucket"] = None
         checks["google"]["existing_bucket_access"] = None
 
-    kaggle_ok, kaggle_detail = _run_quiet(["kaggle", "datasets", "list", "--mine", "--page-size", "1"])
+    kaggle_ok, kaggle_detail = _run_quiet(["kaggle", "datasets", "list", "--mine", "--page", "1"])
     checks["kaggle"] = {"cli_authenticated": kaggle_ok}
     if not kaggle_ok:
         checks["kaggle"]["error"] = kaggle_detail
