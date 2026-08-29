@@ -581,7 +581,9 @@ def cmd_prepare_slr54_speechain(args):
 def cmd_prepare_synthetic_asr(args):
     report = prepare_synthetic_asr(args.input, args.slr54_manifest, args.config, args.output_dir, args.workers, args.resume)
     print(f"✓ Synthetic text prepared: {report['prepared_canonical']:,} canonical texts")
-    print(f"  Observed syllables: {report['observed_syllables']:,}")
+    print(f"  Source inventory: {report['source_observed_types']:,} types")
+    print(f"  Spoken syllables: {report['spoken_observed_syllables']:,}")
+    print(f"  Non-spoken numeric symbols removed: {len(report['normalization_removed_numeric_symbols']):,}")
     print(f"  Rare extra support sentences: {report['rare_extra_sentences']:,}")
 
 

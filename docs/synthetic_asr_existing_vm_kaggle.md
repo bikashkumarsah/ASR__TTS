@@ -194,9 +194,12 @@ python -m dataset_builder.pipeline finalize-synthetic-asr \
 ```
 
 Finalization writes no accepted manifest unless all invariants pass: exactly 20,000
-canonical recordings, at least 1,358 syllables, three distinct accepted voices for
+canonical recordings, all 1,348 spoken syllables, three distinct accepted voices for
 every below-20 syllable, unique audio hashes, complete model coverage, no evaluation
-overlap in training metadata, and tracked TTS spend within budget.
+overlap in training metadata, and tracked TTS spend within budget. The source-text
+inventory remains 1,358 lookup types; the other ten are Devanagari digit glyphs
+(`०`–`९`) that spoken-form normalization expands into words and therefore excludes
+from the phonetic coverage denominator.
 
 The files to retain or download are:
 
