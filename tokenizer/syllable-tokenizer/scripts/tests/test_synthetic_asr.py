@@ -19,6 +19,7 @@ from dataset_builder.synthetic_asr import (
     _fingerprint,
     _init_job_db,
     _phase_jobs,
+    _rebase_synthesis_paths,
     _voice_qualification,
     _write_jsonl,
     export_kaggle_qc,
@@ -97,6 +98,29 @@ class SyntheticAsrTest(unittest.TestCase):
             _effective_requests_per_minute(120, 121)
         with self.assertRaises(ValueError):
             _effective_requests_per_minute(120, 0)
+
+    def test_synthesis_checkpoint_paths_rebase_after_host_transfer(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            job_id, phase = "aud_fixture", "audition"
+            master = root / "audio" / "master_24k" / phase / f"{job_id}.wav"
+            training = root / "audio" / "train_16k" / phase / f"{job_id}.wav"
+            _wav(master)
+            _wav(training)
+            connection = _init_job_db(root / "state" / "synthesis.sqlite3")
+            connection.execute(
+                """INSERT INTO synthesis_jobs(
+                job_id,phase,status,voice,master_path,training_path,updated_at
+                ) VALUES(?,?,?,?,?,?,?)""",
+                (job_id, phase, "succeeded", "F1", "/old/master.wav", "/old/training.wav", "fixture"),
+            )
+            connection.commit()
+            self.assertEqual(_rebase_synthesis_paths(connection, root), 1)
+            stored = connection.execute(
+                "SELECT master_path,training_path FROM synthesis_jobs WHERE job_id=?", (job_id,)
+            ).fetchone()
+            connection.close()
+            self.assertEqual(stored, (str(master), str(training)))
 
     def test_ambiguous_numeric_form_is_quarantined(self):
         result = normalize_spoken_text("मिति ०१/०२/८१")

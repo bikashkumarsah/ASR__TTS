@@ -1040,6 +1040,32 @@ def _init_job_db(path: Path) -> sqlite3.Connection:
     return connection
 
 
+def _rebase_synthesis_paths(connection: sqlite3.Connection, run_dir: Path) -> int:
+    """Repoint portable checkpoints after a run directory moves to another host."""
+    changed = 0
+    rows = connection.execute(
+        "SELECT job_id,phase,master_path,training_path FROM synthesis_jobs WHERE status='succeeded'"
+    ).fetchall()
+    for job_id, phase, master_path, training_path in rows:
+        expected_master = run_dir / "audio" / "master_24k" / phase / f"{job_id}.wav"
+        expected_training = run_dir / "audio" / "train_16k" / phase / f"{job_id}.wav"
+        stored_paths_work = bool(
+            master_path and training_path
+            and Path(master_path).is_file() and Path(training_path).is_file()
+        )
+        if stored_paths_work:
+            continue
+        if expected_master.is_file() and expected_training.is_file():
+            connection.execute(
+                "UPDATE synthesis_jobs SET master_path=?,training_path=?,updated_at=? WHERE job_id=?",
+                (str(expected_master), str(expected_training), _utc_now(), job_id),
+            )
+            changed += 1
+    if changed:
+        connection.commit()
+    return changed
+
+
 def _legal_job_manifest(run_dir: Path, phase: str, jobs: Sequence[Mapping[str, Any]]) -> Path:
     path = run_dir / "manifests" / f"synthesis_{phase}_jobs.jsonl"
     if path.exists():
@@ -1181,6 +1207,7 @@ def synthesize_synthetic_asr(
     jobs = _phase_jobs(root, config, phase, voices)
     manifest_path = _legal_job_manifest(root, phase, jobs)
     connection = _init_job_db(root / "state" / "synthesis.sqlite3")
+    rebased_paths = _rebase_synthesis_paths(connection, root)
     for job in jobs:
         connection.execute(
             "INSERT OR IGNORE INTO synthesis_jobs(job_id,phase,status,voice,updated_at) VALUES(?,?,?,?,?)",
@@ -1300,6 +1327,7 @@ def synthesize_synthetic_asr(
         "estimated_tts_cost_usd": sum(float(row[2]) for row in succeeded_rows),
         "configured_requests_per_minute": configured_rpm,
         "effective_requests_per_minute": effective_rpm,
+        "rebased_checkpoint_paths": rebased_paths,
         "errors": errors[:100],
     }
     _atomic_json(root / "reports" / f"synthesis_{phase}_summary.json", summary)
@@ -1377,6 +1405,7 @@ def validate_synthetic_audio(
     if not database.exists():
         raise RuntimeError("No synthesized jobs found")
     connection = sqlite3.connect(database)
+    _rebase_synthesis_paths(connection, root)
     jobs = connection.execute(
         "SELECT job_id,phase,training_path,master_path,audio_sha256,duration_seconds FROM synthesis_jobs WHERE status='succeeded' ORDER BY job_id"
     ).fetchall()
