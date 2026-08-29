@@ -102,7 +102,10 @@ ${EDITOR:-nano} "$WORK_ROOT/legal_review.json"
 ## 3. Audition, qualify, pilot, and synthesize
 
 TTS calls are quota-bound. `--workers` provides CPU capacity for conversion, while
-the shared limiter remains at 120 requests/minute.
+the shared limiter defaults to the configured ceiling. When a project has a lower
+quota, pass a lower runtime value such as `--requests-per-minute 5`; an override may
+lower but never raise the checked-in safety ceiling and does not invalidate prepared
+checkpoints.
 
 ```bash
 python -m dataset_builder.pipeline synthesize-synthetic-asr \

@@ -588,7 +588,14 @@ def cmd_prepare_synthetic_asr(args):
 
 
 def cmd_synthesize_synthetic_asr(args):
-    report = synthesize_synthetic_asr(args.run_dir, args.phase, args.max_usd, args.workers, args.resume)
+    report = synthesize_synthetic_asr(
+        args.run_dir,
+        args.phase,
+        args.max_usd,
+        args.workers,
+        args.resume,
+        args.requests_per_minute,
+    )
     print(f"✓ {args.phase} synthesis: {report['succeeded']:,}/{report['jobs']:,} jobs")
     print(f"  Generated duration: {report['duration_hours']:.2f} h")
     print(f"  Estimated TTS spend: ${report['estimated_tts_cost_usd']:.2f}")
@@ -846,6 +853,12 @@ Examples:
     p_synthesize.add_argument("--phase", choices=("audition", "pilot", "full"), required=True)
     p_synthesize.add_argument("--max-usd", type=float, default=100.0)
     p_synthesize.add_argument("--workers", type=int, default=None)
+    p_synthesize.add_argument(
+        "--requests-per-minute",
+        type=int,
+        default=None,
+        help="Lower the configured request-rate ceiling for a project-specific quota",
+    )
     p_synthesize.add_argument("--resume", action="store_true")
     p_synthesize.set_defaults(func=cmd_synthesize_synthetic_asr)
 

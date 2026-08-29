@@ -15,6 +15,7 @@ _PROJECT = _SCRIPTS.parent
 sys.path.insert(0, str(_SCRIPTS))
 
 from dataset_builder.synthetic_asr import (
+    _effective_requests_per_minute,
     _fingerprint,
     _init_job_db,
     _phase_jobs,
@@ -88,6 +89,14 @@ class SyntheticAsrTest(unittest.TestCase):
         self.assertIn("एक शून्य प्रतिशत", result["asr_text"])
         self.assertTrue(result["tts_text"].endswith("।"))
         self.assertNotIn("१२", result["asr_text"])
+
+    def test_runtime_request_rate_can_only_lower_configured_ceiling(self):
+        self.assertEqual(_effective_requests_per_minute(120, None), 120)
+        self.assertEqual(_effective_requests_per_minute(120, 5), 5)
+        with self.assertRaises(ValueError):
+            _effective_requests_per_minute(120, 121)
+        with self.assertRaises(ValueError):
+            _effective_requests_per_minute(120, 0)
 
     def test_ambiguous_numeric_form_is_quarantined(self):
         result = normalize_spoken_text("मिति ०१/०२/८१")
