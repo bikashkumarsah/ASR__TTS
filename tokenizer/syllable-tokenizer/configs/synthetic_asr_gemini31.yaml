@@ -1,0 +1,90 @@
+schema_version: 1
+inputs:
+  final_text_jsonl: /data/input/final_20k_diverse_rare.jsonl
+  selection_report: /data/input/final_20k_diverse_rare_report.json
+
+run:
+  target_canonical: 20000
+  seed: 42
+  usage: academic_private
+  legal_review_file: legal_review.json
+
+tokenizer:
+  vocabulary: ../dataset/nepali_syllables_lookup.vocab
+  vocabulary_sha256: 2f5c5ef869018f9af151a853a0db42fadfd38f0ee1f06de8e6a9a72b39b417c5
+  source: ../scripts/syllabic_tokenizer.py
+  source_attainable_inventory: 1358
+  spoken_attainable_inventory: 1348
+
+google_tts:
+  model: gemini-3.1-flash-tts-preview
+  model_launch_stage: preview
+  consumption: standard_paygo_dynamic_throughput
+  language_code: ne-NP
+  requests_per_minute: 120
+  max_input_bytes: 4000
+  master_sample_rate: 24000
+  training_sample_rate: 16000
+  retry_attempts: 7
+  retry_base_seconds: 2.0
+  voices:
+    - {name: Achernar, gender: female}
+    - {name: Aoede, gender: female}
+    - {name: Callirrhoe, gender: female}
+    - {name: Gacrux, gender: female}
+    - {name: Kore, gender: female}
+    - {name: Leda, gender: female}
+    - {name: Achird, gender: male}
+    - {name: Charon, gender: male}
+    - {name: Fenrir, gender: male}
+    - {name: Orus, gender: male}
+    - {name: Puck, gender: male}
+    - {name: Umbriel, gender: male}
+  selected_female: 4
+  selected_male: 4
+  styles:
+    neutral: "Synthesize speech only. Speak exactly the provided Nepali transcript with clear, natural pronunciation, a neutral pace, and no added words."
+    conversational: "Synthesize speech only. Speak exactly the provided Nepali transcript in a natural conversational style with a steady pace and no added words."
+    formal: "Synthesize speech only. Speak exactly the provided Nepali transcript in formal Nepali with careful articulation and no added words."
+
+phases:
+  audition_texts: 50
+  pilot_texts: 2000
+  full_texts: 20000
+
+rare_tail:
+  occurrence_threshold: 20
+  required_voice_realizations: 3
+
+budget:
+  total_usd: 200.0
+  tts_usd: 180.0
+  vm_runtime_storage_usd: 10.0
+  reserve_usd: 10.0
+  price_snapshot_date: "2026-08-29"
+  input_usd_per_million_tokens: 1.0
+  audio_usd_per_million_tokens: 20.0
+  audio_tokens_per_second: 25
+  conservative_seconds_per_syllable: 0.35
+
+qc:
+  whisper_model: openai/whisper-large-v3-turbo
+  whisper_revision: 41f01f3fe87f28c78e2fbf8b568835947dd65ed9
+  mms_model: facebook/mms-1b-all
+  mms_revision: 3d33597edbdaaba14a8e858e2c8caa76e3cec0cd
+  mms_language_adapter: npi
+  speaker_embedding_model: microsoft/wavlm-base-plus-sv
+  speaker_embedding_revision: feb593a6c23c1cc3d9510425c29b0a14d2b07b1e
+  max_cer: 0.35
+  max_wer: 0.60
+  min_pilot_acceptance_rate: 0.95
+  whisper_batch_size: 8
+  whisper_chunk_size: 64
+  clipping_amplitude: 0.999
+  max_clipping_ratio: 0.001
+  min_duration_seconds: 0.20
+  max_duration_seconds: 655.0
+
+storage:
+  existing_gcs_bucket: null
+  minimum_available_disk_gb: 100
