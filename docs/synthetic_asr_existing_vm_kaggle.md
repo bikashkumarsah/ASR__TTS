@@ -105,7 +105,8 @@ TTS calls are quota-bound. `--workers` provides CPU capacity for conversion, whi
 the shared limiter defaults to the configured ceiling. When a project has a lower
 quota, pass a lower runtime value such as `--requests-per-minute 5`; an override may
 lower but never raise the checked-in safety ceiling and does not invalidate prepared
-checkpoints.
+checkpoints. A transferred run directory automatically rebases successful audio paths
+in its SQLite checkpoint when synthesis or CPU validation resumes on another host.
 
 ```bash
 python -m dataset_builder.pipeline synthesize-synthetic-asr \
