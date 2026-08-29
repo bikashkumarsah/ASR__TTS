@@ -1127,20 +1127,18 @@ def _effective_requests_per_minute(configured: int, override: int | None) -> int
 class _RateLimiter:
     def __init__(self, requests_per_minute: int):
         self.limit = requests_per_minute
-        self.events: deque[float] = deque()
+        self.interval_seconds = 60.0 / requests_per_minute
+        self.next_request_at = 0.0
         self.lock = threading.Lock()
 
     def wait(self) -> None:
-        while True:
-            with self.lock:
-                now = time.monotonic()
-                while self.events and now - self.events[0] >= 60:
-                    self.events.popleft()
-                if len(self.events) < self.limit:
-                    self.events.append(now)
-                    return
-                delay = max(0.05, 60 - (now - self.events[0]))
-            time.sleep(min(delay, 1.0))
+        with self.lock:
+            now = time.monotonic()
+            scheduled = max(now, self.next_request_at)
+            self.next_request_at = scheduled + self.interval_seconds
+        delay = scheduled - now
+        if delay > 0:
+            time.sleep(delay)
 
 
 def _convert_audio(master: Path, training: Path, rate: int) -> None:
@@ -1163,8 +1161,11 @@ def _google_synthesize(job: Mapping[str, Any], config: Mapping[str, Any], master
     styles = tts.get("styles", {})
     retry_attempts = int(tts.get("retry_attempts", 5))
     retry_base = float(tts.get("retry_base_seconds", 2.0))
+    retry_max = float(tts.get("retry_max_seconds", 30.0))
+    request_timeout = float(tts.get("request_timeout_seconds", 120.0))
     last_error: Exception | None = None
     for attempt in range(retry_attempts):
+        client = None
         try:
             limiter.wait()
             client = texttospeech.TextToSpeechClient()
@@ -1179,16 +1180,32 @@ def _google_synthesize(job: Mapping[str, Any], config: Mapping[str, Any], master
                 sample_rate_hertz=int(tts.get("master_sample_rate", 24000)),
             )
             response = client.synthesize_speech(
-                request={"input": synthesis_input, "voice": voice, "audio_config": audio_config}, timeout=120
+                request={"input": synthesis_input, "voice": voice, "audio_config": audio_config},
+                timeout=request_timeout,
             )
             master.parent.mkdir(parents=True, exist_ok=True)
             temporary = master.with_suffix(".tmp.wav")
             temporary.write_bytes(response.audio_content)
             os.replace(temporary, master)
             return
-        except (google_exceptions.TooManyRequests, google_exceptions.ServiceUnavailable, google_exceptions.InternalServerError) as error:
+        except (
+            google_exceptions.TooManyRequests,
+            google_exceptions.ServiceUnavailable,
+            google_exceptions.InternalServerError,
+            google_exceptions.DeadlineExceeded,
+        ) as error:
             last_error = error
-            time.sleep(retry_base * (2**attempt) + random.Random(f"{job['job_id']}:{attempt}").random())
+            if attempt + 1 < retry_attempts:
+                delay = min(retry_max, retry_base * (2**attempt))
+                time.sleep(delay + random.Random(f"{job['job_id']}:{attempt}").random())
+        finally:
+            if client is not None:
+                close = getattr(client.transport, "close", None)
+                if close is not None:
+                    try:
+                        close()
+                    except Exception:  # noqa: BLE001 - cleanup must not invalidate received audio
+                        pass
     raise RuntimeError(f"TTS failed after {retry_attempts} attempts: {last_error}")
 
 
@@ -1268,8 +1285,9 @@ def synthesize_synthetic_asr(
         try:
             if stop_for_budget.is_set():
                 raise RuntimeError("Budget guard stopped new TTS requests after observed spend reached the allowance")
-            if not (resume and master.exists() and training.exists()):
+            if not (resume and master.exists()):
                 _google_synthesize(job, config, master, limiter)
+            if not (resume and training.exists()):
                 _convert_audio(master, training, int(config["google_tts"].get("training_sample_rate", 16000)))
             frames, rate, duration = _audio_info(training)
             del frames, rate

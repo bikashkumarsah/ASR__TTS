@@ -115,8 +115,12 @@ For Gemini 3.1 Flash TTS, prepare a fresh run with
 Gemini 2.5 run or reuse its audio. The 3.1 configuration pins
 `gemini-3.1-flash-tts-preview`, its Standard PayGo prices, and a $200 safety budget.
 The model uses dynamic throughput; begin the audition with a conservative runtime
-limit such as `--requests-per-minute 30`, then reduce and resume if the service
-returns `429` responses.
+limit such as `--requests-per-minute 6` and one synthesis worker on macOS, then
+increase only after a successful audition sample. The limiter evenly paces requests
+instead of sending an initial burst. Transient `429`, `500`, `503`, and `504`
+responses are retried with bounded exponential backoff. On resume, a valid master
+WAV is converted locally if its training WAV is missing; the API request is not
+repeated.
 
 ```bash
 python -m dataset_builder.pipeline synthesize-synthetic-asr \

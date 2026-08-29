@@ -8,6 +8,7 @@ import tempfile
 import unittest
 import wave
 from pathlib import Path
+from unittest import mock
 
 import yaml
 
@@ -21,6 +22,7 @@ from dataset_builder.synthetic_asr import (
     _init_job_db,
     _load_run_config,
     _phase_jobs,
+    _RateLimiter,
     _rebase_synthesis_paths,
     _voice_qualification,
     _write_jsonl,
@@ -100,6 +102,16 @@ class SyntheticAsrTest(unittest.TestCase):
             _effective_requests_per_minute(120, 121)
         with self.assertRaises(ValueError):
             _effective_requests_per_minute(120, 0)
+
+    def test_request_limiter_paces_instead_of_bursting(self):
+        limiter = _RateLimiter(30)
+        with (
+            mock.patch("dataset_builder.synthetic_asr.time.monotonic", side_effect=[100.0, 100.0]),
+            mock.patch("dataset_builder.synthetic_asr.time.sleep") as sleep,
+        ):
+            limiter.wait()
+            limiter.wait()
+        sleep.assert_called_once_with(2.0)
 
     def test_gemini31_config_pins_model_pricing_and_spoken_inventory(self):
         config = yaml.safe_load(
