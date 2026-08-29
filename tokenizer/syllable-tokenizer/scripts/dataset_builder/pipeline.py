@@ -23,22 +23,34 @@ _PROJECT_ROOT = _SCRIPT_DIR.parent.parent
 sys.path.insert(0, str(_SCRIPT_DIR.parent))
 
 # Import pipeline modules
-from dataset_builder.extract import extract_pool
+from dataset_builder.analyze import generate_batch_report
 from dataset_builder.annotate import annotate_pool
 from dataset_builder.balance import (
     build_cell_pools_streaming,
     build_syllable_candidate_pools_streaming,
     select_balanced_batch,
 )
-from dataset_builder.analyze import generate_batch_report
-from dataset_builder.coverage import build_source_syllable_inventory, load_coverage_targets
+from dataset_builder.coverage import (
+    build_source_syllable_inventory,
+    load_coverage_targets,
+)
 from dataset_builder.diverse import (
     build_diverse_final,
     compare_prepared_pools,
     prepare_five_corpus_pool,
     update_progress_markdown,
 )
-
+from dataset_builder.extract import extract_pool
+from dataset_builder.synthetic_asr import (
+    export_kaggle_qc,
+    finalize_synthetic_asr,
+    import_kaggle_qc,
+    prepare_slr54_speechain,
+    prepare_synthetic_asr,
+    synthesize_synthetic_asr,
+    synthetic_asr_preflight,
+    validate_synthetic_audio,
+)
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -510,7 +522,7 @@ def cmd_status(args):
         return
 
     print(f"\n{'='*60}")
-    print(f"  CORPUS STATUS")
+    print("  CORPUS STATUS")
     print(f"{'='*60}")
     print(f"  Total selected     : {state.get('total_selected', 0)}")
     print(f"  Batches completed  : {state.get('batches_completed', 0)}")
@@ -548,6 +560,60 @@ def cmd_reset(args):
         print(f"  Removed: {merged}")
 
     print("✓ Reset complete. Ready for fresh extraction.\n")
+
+
+def cmd_synthetic_asr_preflight(args):
+    report = synthetic_asr_preflight(args.work_dir, args.config)
+    print(f"✓ Preflight report: {Path(args.work_dir).expanduser().resolve() / 'preflight.json'}")
+    print(f"  Existing VM CPU cores: {report['system']['nproc']}")
+    print(f"  Ready: {report['ready']}")
+    for issue in report["issues"]:
+        print(f"  - {issue}")
+
+
+def cmd_prepare_slr54_speechain(args):
+    report = prepare_slr54_speechain(args.input_root, args.output_dir, args.seed, args.workers, args.resume)
+    print(f"✓ SLR54 prepared: {args.output_dir}")
+    for split, details in report["splits"].items():
+        print(f"  {split}: {details['utterances']:,} utterances, {details['speakers']:,} speakers, {details['hours']:.2f} h")
+
+
+def cmd_prepare_synthetic_asr(args):
+    report = prepare_synthetic_asr(args.input, args.slr54_manifest, args.config, args.output_dir, args.workers, args.resume)
+    print(f"✓ Synthetic text prepared: {report['prepared_canonical']:,} canonical texts")
+    print(f"  Observed syllables: {report['observed_syllables']:,}")
+    print(f"  Rare extra support sentences: {report['rare_extra_sentences']:,}")
+
+
+def cmd_synthesize_synthetic_asr(args):
+    report = synthesize_synthetic_asr(args.run_dir, args.phase, args.max_usd, args.workers, args.resume)
+    print(f"✓ {args.phase} synthesis: {report['succeeded']:,}/{report['jobs']:,} jobs")
+    print(f"  Generated duration: {report['duration_hours']:.2f} h")
+    print(f"  Estimated TTS spend: ${report['estimated_tts_cost_usd']:.2f}")
+
+
+def cmd_validate_synthetic_audio(args):
+    report = validate_synthetic_audio(args.run_dir, args.stage, args.workers, args.resume)
+    print(f"✓ CPU audio QC: {report['passed']:,}/{report['records']:,} passed")
+
+
+def cmd_export_kaggle_qc(args):
+    report = export_kaggle_qc(args.run_dir, args.output_dir, args.shard_size_gb, args.workers)
+    print(f"✓ Private Kaggle input package: {args.output_dir}")
+    print(f"  {report['records']:,} recordings in {report['archives']} archives")
+
+
+def cmd_import_kaggle_qc(args):
+    report = import_kaggle_qc(args.run_dir, args.results_dir, args.resume)
+    print(f"✓ Kaggle QC imported: {report['whisper_records']:,} Whisper, {report['mms_records']:,} MMS")
+    print(f"  Required MMS complete: {report['complete_required_mms']}")
+
+
+def cmd_finalize_synthetic_asr(args):
+    report = finalize_synthetic_asr(args.run_dir, args.workers)
+    print(f"✓ Accepted synthetic ASR package: {report['canonical_accepted']:,} canonical recordings")
+    print(f"  Rare voice extras: {report['rare_extras_accepted']:,}")
+    print(f"  Syllable coverage: {report['syllable_coverage']:,}")
 
 
 # ---------------------------------------------------------------------------
@@ -741,6 +807,78 @@ Examples:
         default=str(_PROJECT_ROOT.parent.parent / "docs" / "technical_progress_report.md"),
     )
     p_progress.set_defaults(func=cmd_update_progress)
+
+    # ---- existing-VM synthetic ASR pipeline ----
+    p_syn_preflight = subparsers.add_parser(
+        "synthetic-asr-preflight", help="Read-only existing-VM, credentials, disk, and tool checks",
+    )
+    p_syn_preflight.add_argument("--work-dir", required=True)
+    p_syn_preflight.add_argument("--config", required=True)
+    p_syn_preflight.set_defaults(func=cmd_synthetic_asr_preflight)
+
+    p_slr54 = subparsers.add_parser(
+        "prepare-slr54-speechain", help="Prepare deterministic speaker-disjoint SLR54 manifests",
+    )
+    p_slr54.add_argument("--input-root", required=True)
+    p_slr54.add_argument("--output-dir", required=True)
+    p_slr54.add_argument("--seed", type=int, default=42)
+    p_slr54.add_argument("--workers", type=int, default=None)
+    p_slr54.add_argument("--resume", action="store_true")
+    p_slr54.set_defaults(func=cmd_prepare_slr54_speechain)
+
+    p_syn_prepare = subparsers.add_parser(
+        "prepare-synthetic-asr", help="Normalize the verified text and build phase/rare-tail manifests",
+    )
+    p_syn_prepare.add_argument("--input", required=True)
+    p_syn_prepare.add_argument("--slr54-manifest", required=True)
+    p_syn_prepare.add_argument("--config", required=True)
+    p_syn_prepare.add_argument("--output-dir", required=True)
+    p_syn_prepare.add_argument("--workers", type=int, default=None)
+    p_syn_prepare.add_argument("--resume", action="store_true")
+    p_syn_prepare.set_defaults(func=cmd_prepare_synthetic_asr)
+
+    p_synthesize = subparsers.add_parser(
+        "synthesize-synthetic-asr", help="Run a budget-gated Gemini-TTS phase on the existing VM",
+    )
+    p_synthesize.add_argument("--run-dir", required=True)
+    p_synthesize.add_argument("--phase", choices=("audition", "pilot", "full"), required=True)
+    p_synthesize.add_argument("--max-usd", type=float, default=100.0)
+    p_synthesize.add_argument("--workers", type=int, default=None)
+    p_synthesize.add_argument("--resume", action="store_true")
+    p_synthesize.set_defaults(func=cmd_synthesize_synthetic_asr)
+
+    p_audio_qc = subparsers.add_parser(
+        "validate-synthetic-audio", help="Run existing-VM CPU audio integrity checks",
+    )
+    p_audio_qc.add_argument("--run-dir", required=True)
+    p_audio_qc.add_argument("--stage", choices=("cpu",), default="cpu")
+    p_audio_qc.add_argument("--workers", type=int, default=None)
+    p_audio_qc.add_argument("--resume", action="store_true")
+    p_audio_qc.set_defaults(func=cmd_validate_synthetic_audio)
+
+    p_kaggle_export = subparsers.add_parser(
+        "export-kaggle-qc", help="Create private Kaggle audio shards and a ready QC notebook",
+    )
+    p_kaggle_export.add_argument("--run-dir", required=True)
+    p_kaggle_export.add_argument("--output-dir", required=True)
+    p_kaggle_export.add_argument("--shard-size-gb", type=float, default=4.0)
+    p_kaggle_export.add_argument("--workers", type=int, default=None)
+    p_kaggle_export.set_defaults(func=cmd_export_kaggle_qc)
+
+    p_kaggle_import = subparsers.add_parser(
+        "import-kaggle-qc", help="Validate and merge compact Kaggle Whisper/MMS results",
+    )
+    p_kaggle_import.add_argument("--run-dir", required=True)
+    p_kaggle_import.add_argument("--results-dir", required=True)
+    p_kaggle_import.add_argument("--resume", action="store_true")
+    p_kaggle_import.set_defaults(func=cmd_import_kaggle_qc)
+
+    p_syn_finalize = subparsers.add_parser(
+        "finalize-synthetic-asr", help="Enforce final acceptance and export SpeeChain manifests",
+    )
+    p_syn_finalize.add_argument("--run-dir", required=True)
+    p_syn_finalize.add_argument("--workers", type=int, default=None)
+    p_syn_finalize.set_defaults(func=cmd_finalize_synthetic_asr)
 
     # ---- merge ----
     p_merge = subparsers.add_parser("merge", help="Merge all batches into final corpus")

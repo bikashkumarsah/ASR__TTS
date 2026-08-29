@@ -173,3 +173,14 @@ software versions, quantization, seed, machine, and process/thread topology
 recorded in the manifest.
 For full acceptance comparison, keep the previous final 50k JSONL on the cloud
 and pass it with `--baseline`.
+
+## Synthetic ASR on the existing VM and Kaggle
+
+The verified 20k text can be converted into a Gemini-TTS synthetic ASR package
+without provisioning another Google Cloud VM or GPU. Preparation, synthesis, CPU
+QC, SLR54 splitting, final acceptance, and SpeeChain export run on the existing VM;
+Whisper and targeted MMS verification run in a private Kaggle GPU notebook. The
+pipeline prepares training configurations but never executes ASR training.
+
+Install `requirements-synthetic-asr.txt` and follow the complete phase gates in
+[`../../docs/synthetic_asr_existing_vm_kaggle.md`](../../docs/synthetic_asr_existing_vm_kaggle.md).

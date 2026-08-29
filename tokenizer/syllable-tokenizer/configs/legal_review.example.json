@@ -1,0 +1,9 @@
+{
+  "approved": false,
+  "usage": "academic_private",
+  "google_terms_reviewed": false,
+  "kaggle_private_transfer_approved": false,
+  "reviewer": "",
+  "reviewed_at": "",
+  "notes": "Copy this file to RUN_DIR/legal_review.json and complete it before synthesis."
+}

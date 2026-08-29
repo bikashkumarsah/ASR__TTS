@@ -1,0 +1,15 @@
+schema_version: 1
+training_execution: false
+token_type: syllable
+seeds: [42, 43, 44]
+shared_evaluation:
+  dev: SLR54 speaker-disjoint dev
+  test: SLR54 speaker-disjoint test
+  metrics: [cer, wer, syllable_error_rate, rare_syllable_recall]
+experiments:
+  - {name: slr54_real_only, train: [slr54_train]}
+  - {name: slr54_plus_qc_synthetic, train: [slr54_train, synthetic_qc_passed]}
+  - name: synthetic_pretrain_then_slr54_finetune
+    pretrain: [synthetic_qc_passed]
+    finetune: [slr54_train]
+
