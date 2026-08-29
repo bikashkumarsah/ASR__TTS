@@ -5,6 +5,9 @@ repeatable pipeline for building a balanced ASR corpus. The builder extracts
 sentences, annotates metadata, selects balanced batches, writes reports, and
 merges the batches into a final JSONL corpus.
 
+The existing-VM Gemini-TTS and private-Kaggle QC workflow is documented in
+[`docs/synthetic_asr_existing_vm_kaggle.md`](docs/synthetic_asr_existing_vm_kaggle.md).
+
 ## Requirements
 
 Use Python 3.10+ and install the project dependencies from the repository root:
