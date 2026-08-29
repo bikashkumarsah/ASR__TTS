@@ -110,6 +110,14 @@ in its SQLite checkpoint when synthesis or CPU validation resumes on another hos
 Resolved tokenizer and vocabulary paths may change with the host, but relocation still
 requires identical configuration, tokenizer, vocabulary, and lookup-entry checksums.
 
+For Gemini 3.1 Flash TTS, prepare a fresh run with
+`../configs/synthetic_asr_gemini31.yaml`. Do not change the model in an existing
+Gemini 2.5 run or reuse its audio. The 3.1 configuration pins
+`gemini-3.1-flash-tts-preview`, its Standard PayGo prices, and a $200 safety budget.
+The model uses dynamic throughput; begin the audition with a conservative runtime
+limit such as `--requests-per-minute 30`, then reduce and resume if the service
+returns `429` responses.
+
 ```bash
 python -m dataset_builder.pipeline synthesize-synthetic-asr \
   --run-dir "$WORK_ROOT" --phase audition --max-usd 100 \

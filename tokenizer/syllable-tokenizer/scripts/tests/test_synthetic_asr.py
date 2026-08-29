@@ -101,6 +101,18 @@ class SyntheticAsrTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             _effective_requests_per_minute(120, 0)
 
+    def test_gemini31_config_pins_model_pricing_and_spoken_inventory(self):
+        config = yaml.safe_load(
+            (_PROJECT / "configs" / "synthetic_asr_gemini31.yaml").read_text(encoding="utf-8")
+        )
+        self.assertEqual(config["google_tts"]["model"], "gemini-3.1-flash-tts-preview")
+        self.assertEqual(config["google_tts"]["consumption"], "standard_paygo_dynamic_throughput")
+        self.assertEqual(config["budget"]["input_usd_per_million_tokens"], 1.0)
+        self.assertEqual(config["budget"]["audio_usd_per_million_tokens"], 20.0)
+        self.assertEqual(config["tokenizer"]["spoken_attainable_inventory"], 1348)
+        for prompt in config["google_tts"]["styles"].values():
+            self.assertIn("Synthesize speech only", prompt)
+
     def test_synthesis_checkpoint_paths_rebase_after_host_transfer(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
