@@ -43,8 +43,8 @@ google_tts:
     - {name: Orus, gender: male}
     - {name: Puck, gender: male}
     - {name: Umbriel, gender: male}
-  selected_female: 4
-  selected_male: 4
+  selected_female: 6
+  selected_male: 6
   styles:
     neutral: "Synthesize speech only. Speak exactly the provided Nepali transcript with clear, natural pronunciation, a neutral pace, and no added words."
     conversational: "Synthesize speech only. Speak exactly the provided Nepali transcript in a natural conversational style with a steady pace and no added words."
@@ -90,4 +90,4 @@ qc:
 
 storage:
   existing_gcs_bucket: null
-  minimum_available_disk_gb: 100
+  minimum_available_disk_gb: 50

@@ -133,7 +133,8 @@ python -m dataset_builder.pipeline validate-synthetic-audio \
 
 Export and run Kaggle QC as described below. Import the audition results; this ranks
 voices by Whisper CER, rare-syllable recall, CPU integrity, and WavLM speaker-vector
-separation, then selects four female and four male voices. Pilot/full synthesis will
+separation, then selects the gender-balanced count pinned by the run configuration.
+The Gemini 3.1 final-run profile retains all six female and six male voices. Pilot/full synthesis will
 not proceed without this qualification file.
 
 ```bash

@@ -141,6 +141,9 @@ class SyntheticAsrTest(unittest.TestCase):
         self.assertEqual(config["tokenizer"]["lookup_window_size"], 4)
         self.assertEqual(config["tokenizer"]["source_attainable_inventory"], 1183)
         self.assertEqual(config["tokenizer"]["spoken_attainable_inventory"], 1173)
+        self.assertEqual(config["google_tts"]["selected_female"], 6)
+        self.assertEqual(config["google_tts"]["selected_male"], 6)
+        self.assertEqual(config["storage"]["minimum_available_disk_gb"], 50)
         for prompt in config["google_tts"]["styles"].values():
             self.assertIn("Synthesize speech only", prompt)
 
