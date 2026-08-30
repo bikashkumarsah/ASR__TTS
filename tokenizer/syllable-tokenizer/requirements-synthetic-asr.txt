@@ -2,7 +2,10 @@
 google-cloud-texttospeech==2.37.0
 google-cloud-storage==3.3.1
 kaggle==1.7.4.5
-numpy==2.2.6
+# Compatible with the existing Anaconda base environment and its compiled
+# pandas/numexpr/bottleneck/TensorFlow stack. The synthetic pipeline does not
+# require NumPy 2.x APIs.
+numpy==1.26.4
 PyYAML==6.0.2
 pyarrow==21.0.0
 soundfile==0.13.1
