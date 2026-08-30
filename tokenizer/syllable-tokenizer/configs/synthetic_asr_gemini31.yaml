@@ -13,8 +13,9 @@ tokenizer:
   vocabulary: ../dataset/nepali_syllables_lookup.vocab
   vocabulary_sha256: 2f5c5ef869018f9af151a853a0db42fadfd38f0ee1f06de8e6a9a72b39b417c5
   source: ../scripts/syllabic_tokenizer.py
-  source_attainable_inventory: 1358
-  spoken_attainable_inventory: 1348
+  lookup_window_size: 4
+  source_attainable_inventory: 1183
+  spoken_attainable_inventory: 1173
 
 google_tts:
   model: gemini-3.1-flash-tts-preview

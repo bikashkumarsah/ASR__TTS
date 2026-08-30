@@ -15,10 +15,10 @@ semantic repetition.
 
 The previous final corpus contains 50,000 records, 3,154,230 recognized
 syllable tokens under the earlier tokenizer and reported 1,168 source-pool
-syllables. That result used a fixed four-code-point matching window, so it is
-historical rather than a valid estimate of source support for the pinned lookup
-vocabulary. The corrected workflow retokenizes the baseline from normalized
-text and compares both corpora only on their shared observed support.
+syllables. The later full-vocabulary-window experiment remains a separate,
+checksum-pinned result. Comparisons with the pronunciation-aware tokenizer
+paper now use the fixed four-code-point window and must not combine statistics
+from the two tokenizer definitions.
 
 ## Current workflow
 
@@ -29,8 +29,12 @@ text and compares both corpora only on their shared observed support.
 - Every resumable stage also records the SHA-256 of
   `scripts/syllabic_tokenizer.py`; the combined configuration fingerprint
   changes whenever that tokenizer source changes.
-- The tokenizer derives its match window from the longest pinned entry; an
-  exhaustive test verifies that every selectable vocabulary entry is emittable.
+- The default tokenizer uses the paper's fixed four-code-point lookup window.
+  It emits 1,244 of the 1,778 selectable lookup entries; the 534 entries of
+  length five to seven are explicitly reported as structurally unemittable.
+- The former full-vocabulary-window behavior is available only through the
+  explicit `max_token_length=None` compatibility option. Existing prepared
+  runs remain reproducible through their pinned tokenizer copies.
 - Coverage is reported separately for tokenizer structure, five-corpus source
   support, and the final selected corpus.
 - The five public corpora are streamed and exactly deduplicated before
@@ -66,6 +70,22 @@ The workflow targets a 64 GB / 12 vCPU cloud runner.
   leaves no traceback.
 
 ## Daily verified runs
+
+### 2026-08-30: four-window paper-comparison mode
+
+- Restored the fixed four-code-point greedy lookup window used by the reference
+  pronunciation-aware tokenizer paper.
+- Retokenizing the verified 20,000 source texts produces 1,183 observed source
+  types; after spoken-form digit expansion, the TTS/ASR transcript inventory is
+  1,173 types. Whitespace is excluded from both analytical counts.
+- The existing full-vocabulary-window result (1,358 source and 1,348 spoken
+  types) remains historical and reproducible, but it is not used as the direct
+  denominator for the paper comparison.
+- The synthetic-ASR configurations pin `lookup_window_size: 4`, and fresh run
+  directories are required after this tokenizer-source change.
+- This is an algorithm-controlled comparison rather than an exact replication:
+  the reference paper reports 650 pronunciation-aware tokens, while the project
+  continues to use its separately constructed, checksum-pinned lookup file.
 
 Run sections below are generated idempotently from the machine-readable final
 report:

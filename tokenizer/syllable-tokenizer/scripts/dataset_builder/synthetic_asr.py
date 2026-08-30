@@ -132,6 +132,14 @@ def _load_tokenizer(config: Mapping[str, Any], config_path: Path):
         raise RuntimeError(f"Cannot load tokenizer source: {source_path}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    expected_window = section.get("lookup_window_size")
+    actual_window = getattr(module, "DEFAULT_LOOKUP_WINDOW_SIZE", None)
+    if expected_window is not None and actual_window != int(expected_window):
+        raise RuntimeError(
+            "Tokenizer lookup-window mismatch: "
+            f"configuration requires {int(expected_window)}, source declares {actual_window} "
+            f"({source_path})"
+        )
     lookup = module.get_lookup_tokens(str(vocab_path))
     return module, lookup, vocab_path, source_path
 
@@ -145,6 +153,7 @@ def _fingerprint(config: Mapping[str, Any], config_path: Path) -> dict[str, Any]
         "vocabulary_sha256": _sha256(vocab_path),
         "tokenizer_source": str(source_path),
         "tokenizer_sha256": _sha256(source_path),
+        "lookup_window_size": getattr(_module, "DEFAULT_LOOKUP_WINDOW_SIZE", None),
         "lookup_entries": len(lookup),
     }
 
@@ -154,6 +163,11 @@ def _portable_fingerprint(fingerprint: Mapping[str, Any]) -> dict[str, Any]:
     portable = dict(fingerprint)
     portable.pop("vocabulary_path", None)
     portable.pop("tokenizer_source", None)
+    # Prepared seven-window runs predate the explicit window field.  Their
+    # pinned tokenizer source still provides the content identity, so a missing
+    # value and the inferred legacy ``None`` are equivalent.
+    if portable.get("lookup_window_size") is None:
+        portable.pop("lookup_window_size", None)
     return portable
 
 
@@ -588,9 +602,13 @@ def _load_hashes(path: Path) -> set[str]:
 
 
 def _record_syllables(record: Mapping[str, Any], tokenizer: Any, lookup: Sequence[str], text: str) -> list[str]:
-    supplied = record.get("syllables")
-    if supplied and isinstance(supplied, list):
-        return [str(item) for item in supplied if str(item).strip()]
+    """Retokenize source text with the pinned tokenizer for this run.
+
+    Candidate JSONL files can carry syllable arrays produced by an older
+    tokenizer window.  Reusing them would mix incompatible inventories while
+    the text itself remains valid input.
+    """
+    del record
     return [token for token in tokenizer.tokenize(text, lookup) if token.strip()]
 
 
@@ -711,14 +729,6 @@ def prepare_synthetic_asr(
         seen_source_hashes.add(source_hash)
         original_syllables = _record_syllables(raw, tokenizer, lookup, _normalize_spaces(source_text))
         asr_syllables = [token for token in tokenizer.tokenize(spoken["asr_text"], lookup) if token.strip()]
-        required_rare = set(raw.get("rare_syllables") or [])
-        disappeared = required_rare.difference(asr_syllables)
-        if disappeared:
-            quarantine.append({
-                "input_index": index, "source_text": source_text,
-                "reason": "required_rare_syllable_disappeared", "syllables": sorted(disappeared),
-            })
-            continue
         if len(spoken["tts_text"].encode("utf-8")) > max_input_bytes:
             quarantine.append({"input_index": index, "source_text": source_text, "reason": "tts_input_byte_limit"})
             continue
@@ -732,7 +742,9 @@ def prepare_synthetic_asr(
             "spoken_sha256": _text_sha256(spoken["asr_text"]),
             "syllables": asr_syllables,
             "unique_syllables": sorted(set(asr_syllables)),
-            "rare_syllables": sorted(required_rare),
+            # Recomputed over the complete current-tokenizer inventory below;
+            # never inherit rare labels produced by a different tokenizer.
+            "rare_syllables": [],
             "normalization_actions": spoken["actions"],
             "evaluation_overlap": _text_sha256(_normalize_slr54_text(source_text)) in evaluation_hashes,
             "source_corpora": raw.get("source_corpora", raw.get("source")),
@@ -1886,11 +1898,11 @@ def _write_speechain_vocab(root: Path, config: Mapping[str, Any], config_path: P
         if token.strip()
     ]
     selectable = [token for token in analytical if token not in {"।", "॥", "?", "!"}]
-    unemittable = [token for token in selectable if module.tokenize(token, lookup) != [token]]
-    if unemittable:
-        raise RuntimeError(f"SpeeChain syllable round-trip preflight failed for {unemittable[:10]}")
+    emittable = [token for token in selectable if module.tokenize(token, lookup) == [token]]
+    emittable_set = set(emittable)
+    unemittable = [token for token in selectable if token not in emittable_set]
     # SpeeChain's GPU CTC path requires the blank index to be zero.
-    tokens = ["<blank>", "<sos/eos>", "<unk>", "<space>"] + selectable
+    tokens = ["<blank>", "<sos/eos>", "<unk>", "<space>"] + emittable
     vocab_path = token_root / "vocab"
     vocab_path.write_text("\n".join(tokens) + "\n", encoding="utf-8")
     shutil.copy2(vocab_source, token_root / "lookup.vocab")
@@ -1899,7 +1911,11 @@ def _write_speechain_vocab(root: Path, config: Mapping[str, Any], config_path: P
         "created_at": _utc_now(), "vocabulary_sha256": _sha256(vocab_source),
         "tokenizer_sha256": _sha256(tokenizer_source), "speechain_vocab_sha256": _sha256(vocab_path),
         "tokens": len(tokens), "blank_index": 0, "sos_eos_index": 1,
-        "space_token": "<space>", "round_trip_verified": len(selectable),
+        "space_token": "<space>", "round_trip_verified": len(emittable),
+        "lookup_window_size": getattr(module, "DEFAULT_LOOKUP_WINDOW_SIZE", None),
+        "lookup_selectable_entries": len(selectable),
+        "tokenizer_unemittable_count": len(unemittable),
+        "tokenizer_unemittable_syllables": unemittable,
     })
     return token_root
 
