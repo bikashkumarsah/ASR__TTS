@@ -12,6 +12,14 @@ _NON_DEVA_RE = re.compile(r"[^\u0900-\u097F\s]")
 _SPACE_RE = re.compile(r"\s+")
 _MAX_TOKEN_LENGTH_CACHE = {}
 
+# The pronunciation-aware tokenizer used by Ghimire et al. evaluates lookup
+# candidates in a fixed window of at most four Unicode code points.  Keep that
+# paper-comparable behaviour as the project default.  Passing
+# ``max_token_length=None`` to ``tokenize`` remains an explicit opt-in to the
+# former full-vocabulary (currently seven-code-point) search for reproducibility
+# of already completed runs.
+DEFAULT_LOOKUP_WINDOW_SIZE = 4
+
 
 def clean_text(text):
     text = html.unescape(text)
@@ -44,14 +52,31 @@ def _max_token_length(lookup_vocab):
     return value
 
 
-def tokenize(sentense, lookup_vocab, debug=False, max_token_length=None):
+def tokenize(
+    sentense,
+    lookup_vocab,
+    debug=False,
+    max_token_length=DEFAULT_LOOKUP_WINDOW_SIZE,
+):
+    """Tokenize with greedy longest lookup matching.
+
+    The default four-code-point window matches the published
+    pronunciation-aware tokenizer.  Use ``max_token_length=None`` only when
+    reproducing the legacy full-vocabulary-window results.
+    """
+    if max_token_length is not None and max_token_length < 1:
+        raise ValueError("max_token_length must be a positive integer or None")
     sentense = clean_text(sentense)
     aligned_tokens = [ ]
     pos = 0
     print_debug(f"Total length of Sent : {len(sentense)}", debug)
     while (pos < len(sentense)):
         print_debug(f"current pos : {pos}", debug)
-        move_upto = max_token_length or _max_token_length(lookup_vocab)
+        move_upto = (
+            _max_token_length(lookup_vocab)
+            if max_token_length is None
+            else max_token_length
+        )
         # if(pos == len(chars)-1): aligned_tokens.append(chars[pos])
 
         if pos + move_upto > (len(sentense)): move_upto = len(sentense) - pos

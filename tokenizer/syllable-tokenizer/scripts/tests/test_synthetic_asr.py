@@ -22,7 +22,9 @@ from dataset_builder.synthetic_asr import (
     _init_job_db,
     _load_run_config,
     _phase_jobs,
+    _portable_fingerprint,
     _RateLimiter,
+    _record_syllables,
     _rebase_synthesis_paths,
     _voice_qualification,
     _write_jsonl,
@@ -113,6 +115,21 @@ class SyntheticAsrTest(unittest.TestCase):
             limiter.wait()
         sleep.assert_called_once_with(2.0)
 
+    def test_source_syllables_are_retokenized_instead_of_reusing_stale_annotations(self):
+        from syllabic_tokenizer import get_lookup_tokens
+
+        vocabulary = get_lookup_tokens(str(_PROJECT / "dataset" / "nepali_syllables_lookup.vocab"))
+        tokenizer = mock.Mock()
+        tokenizer.tokenize.return_value = ["क", "ख"]
+        result = _record_syllables(
+            {"syllables": ["stale-seven-window-token"]},
+            tokenizer,
+            vocabulary,
+            "कख",
+        )
+        self.assertEqual(result, ["क", "ख"])
+        tokenizer.tokenize.assert_called_once_with("कख", vocabulary)
+
     def test_gemini31_config_pins_model_pricing_and_spoken_inventory(self):
         config = yaml.safe_load(
             (_PROJECT / "configs" / "synthetic_asr_gemini31.yaml").read_text(encoding="utf-8")
@@ -121,7 +138,9 @@ class SyntheticAsrTest(unittest.TestCase):
         self.assertEqual(config["google_tts"]["consumption"], "standard_paygo_dynamic_throughput")
         self.assertEqual(config["budget"]["input_usd_per_million_tokens"], 1.0)
         self.assertEqual(config["budget"]["audio_usd_per_million_tokens"], 20.0)
-        self.assertEqual(config["tokenizer"]["spoken_attainable_inventory"], 1348)
+        self.assertEqual(config["tokenizer"]["lookup_window_size"], 4)
+        self.assertEqual(config["tokenizer"]["source_attainable_inventory"], 1183)
+        self.assertEqual(config["tokenizer"]["spoken_attainable_inventory"], 1173)
         for prompt in config["google_tts"]["styles"].values():
             self.assertIn("Synthesize speech only", prompt)
 
@@ -147,6 +166,11 @@ class SyntheticAsrTest(unittest.TestCase):
             ).fetchone()
             connection.close()
             self.assertEqual(stored, (str(master), str(training)))
+
+    def test_legacy_missing_window_and_inferred_none_have_same_identity(self):
+        legacy = {"configuration_sha256": "fixture", "tokenizer_sha256": "old"}
+        inferred = {**legacy, "lookup_window_size": None}
+        self.assertEqual(_portable_fingerprint(legacy), _portable_fingerprint(inferred))
 
     def test_prepared_run_fingerprint_survives_host_transfer(self):
         with tempfile.TemporaryDirectory() as temporary:

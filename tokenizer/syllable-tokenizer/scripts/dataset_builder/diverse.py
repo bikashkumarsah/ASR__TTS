@@ -36,7 +36,7 @@ from corpus_analysis.sources import iter_records, load_config, validate_source
 from dataset_builder.annotate import annotate_record, load_rules
 from dataset_builder.extract import passes_quality
 from dataset_builder.syllable_stats import _SKIP_TOKENS
-from syllabic_tokenizer import get_lookup_tokens, tokenize
+from syllabic_tokenizer import DEFAULT_LOOKUP_WINDOW_SIZE, get_lookup_tokens, tokenize
 from syllable_metrics import (
     distribution_statistics,
     jensen_shannon_divergence,
@@ -129,6 +129,13 @@ def _resolve_lookup(config: dict) -> tuple[Path, frozenset[str], str]:
         raise RuntimeError(
             f"Pinned vocabulary checksum mismatch for {path}: expected {expected}, got {actual}"
         )
+    expected_window = entry.get("lookup_window_size")
+    if expected_window is not None and int(expected_window) != DEFAULT_LOOKUP_WINDOW_SIZE:
+        raise RuntimeError(
+            "Tokenizer lookup-window mismatch: "
+            f"configuration requires {int(expected_window)}, source declares "
+            f"{DEFAULT_LOOKUP_WINDOW_SIZE}"
+        )
     raw = get_lookup_tokens(str(path))
     analytical = frozenset(token for token in raw if token.strip())
     expected_raw = entry.get("raw_entries")
@@ -170,6 +177,7 @@ def _validate_tokenizer_inventory_checkpoint(
     expected_unemittable = sorted(vocabulary_layers["tokenizer_unemittable"])
     checks = {
         "tokenizer_source_sha256": tokenizer_sha256,
+        "tokenizer_lookup_window_size": DEFAULT_LOOKUP_WINDOW_SIZE,
         "tokenizer_emittable_count": len(expected_emittable),
         "tokenizer_emittable_syllables": expected_emittable,
         "tokenizer_unemittable_count": len(expected_unemittable),
@@ -570,6 +578,7 @@ def prepare_five_corpus_pool(
             "vocabulary_sha256": vocab_sha,
             "tokenizer_source_path": str(_TOKENIZER_SOURCE),
             "tokenizer_source_sha256": tokenizer_sha,
+            "tokenizer_lookup_window_size": DEFAULT_LOOKUP_WINDOW_SIZE,
             "diverse_config_sha256": config_fingerprint,
             "raw_vocabulary_size": int(config["lookup_vocabulary"]["raw_entries"]),
             "analytical_vocabulary_size": len(analytical_vocab),
@@ -2377,6 +2386,7 @@ def build_diverse_final(
         "vocabulary": {
             "sha256": vocab_sha,
             "tokenizer_source_sha256": tokenizer_sha,
+            "tokenizer_lookup_window_size": DEFAULT_LOOKUP_WINDOW_SIZE,
             "raw_entries": int(config["lookup_vocabulary"]["raw_entries"]),
             "analytical_entries": len(analytical_vocab),
             "selection_entries": len(selection_vocab),

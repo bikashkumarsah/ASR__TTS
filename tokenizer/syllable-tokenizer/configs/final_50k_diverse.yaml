@@ -3,6 +3,7 @@ lookup_vocabulary:
   sha256: 2f5c5ef869018f9af151a853a0db42fadfd38f0ee1f06de8e6a9a72b39b417c5
   raw_entries: 1782
   analytical_entries: 1781
+  lookup_window_size: 4
 
 preparation:
   min_syllables: 5

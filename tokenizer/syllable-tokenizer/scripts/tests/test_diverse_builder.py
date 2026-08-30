@@ -31,7 +31,11 @@ from syllable_metrics import (  # noqa: E402
     jensen_shannon_divergence,
     rarity_counts,
 )
-from syllabic_tokenizer import get_lookup_tokens, tokenize  # noqa: E402
+from syllabic_tokenizer import (  # noqa: E402
+    DEFAULT_LOOKUP_WINDOW_SIZE,
+    get_lookup_tokens,
+    tokenize,
+)
 
 
 class SharedMetricTest(unittest.TestCase):
@@ -74,14 +78,22 @@ class SharedMetricTest(unittest.TestCase):
                 second_fingerprint = diverse_module._config_fingerprint({"fixture": True})
         self.assertNotEqual(first_fingerprint, second_fingerprint)
 
-    def test_every_pinned_lookup_entry_is_emittable(self):
+    def test_default_window_matches_paper_and_legacy_full_window_is_explicit(self):
         project = _SCRIPTS.parent
         vocabulary = get_lookup_tokens(str(project / "dataset/nepali_syllables_lookup.vocab"))
-        unemittable = [
+        default_unemittable = [
             token for token in vocabulary
             if token.strip() and token not in _SKIP_TOKENS and tokenize(token, vocabulary) != [token]
         ]
-        self.assertEqual(unemittable, [])
+        legacy_unemittable = [
+            token for token in vocabulary
+            if token.strip() and token not in _SKIP_TOKENS
+            and tokenize(token, vocabulary, max_token_length=None) != [token]
+        ]
+        self.assertEqual(DEFAULT_LOOKUP_WINDOW_SIZE, 4)
+        self.assertEqual(len(default_unemittable), 534)
+        self.assertTrue(all(len(token) > DEFAULT_LOOKUP_WINDOW_SIZE for token in default_unemittable))
+        self.assertEqual(legacy_unemittable, [])
 
     def test_entropy_gini_and_jsd(self):
         inventory = frozenset({"a", "b", "c"})
@@ -315,6 +327,12 @@ class DiversePreparationTest(unittest.TestCase):
         broken.write_text(yaml.safe_dump(config), encoding="utf-8")
         with self.assertRaises(RuntimeError):
             _resolve_lookup(yaml.safe_load(broken.read_text()))
+
+    def test_lookup_window_is_pinned(self):
+        config = yaml.safe_load(self.diverse_config.read_text())
+        config["lookup_vocabulary"]["lookup_window_size"] = 7
+        with self.assertRaisesRegex(RuntimeError, "lookup-window mismatch"):
+            _resolve_lookup(config)
 
     def test_resume_rejects_changed_tokenizer_inventory(self):
         prepared = self._run("tampered_inventory", 1)

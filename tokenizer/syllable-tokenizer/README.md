@@ -106,13 +106,19 @@ Shannon entropy and Gini are the headline balance metrics; CV is retained only
 as a diagnostic.
 
 Coverage is reported at three distinct layers: tokenizer-emittable vocabulary,
-five-corpus source support, and final selection coverage. The tokenizer derives
-its match window from the pinned vocabulary, including the five-to-seven-code-
-point entries that the previous fixed four-code-point window could not emit.
-The configuration's 1,781 analytical entries are a non-whitespace integrity
-count; the actual coverage denominator is 1,778 after excluding `।`, `?`, and
-`!`. Resume checkpoints pin the tokenizer source SHA-256 as well as the lookup
-vocabulary, and revalidate the complete emittable/unemittable inventory.
+five-corpus source support, and final selection coverage. The default tokenizer
+uses a fixed four-code-point lookup window to match the pronunciation-aware
+algorithm described by Ghimire et al. Of the configuration's 1,778 selectable
+lookup entries (1,781 non-whitespace entries minus `।`, `?`, and `!`), 1,244
+are emittable with this window and 534 five-to-seven-code-point entries are
+intentionally outside the paper-comparable denominator. Passing
+`max_token_length=None` explicitly reproduces the former full-vocabulary
+seven-code-point search; it is not the default. Resume checkpoints pin the
+tokenizer source SHA-256 as well as the lookup vocabulary and revalidate the
+complete emittable/unemittable inventory, so four- and seven-window artifacts
+cannot be mixed. This establishes algorithmic window parity, not an exact
+replication of the paper: the paper reports a 650-token pronunciation-aware
+inventory, whereas this project retains its checksum-pinned lookup vocabulary.
 Hard semantic cutoffs and final nearest-neighbour audits use exact FAISS
 `IndexFlatIP`. E5 is used for selection, while comparative semantic acceptance
 against the previous 50k corpus uses held-out LaBSE embeddings.
